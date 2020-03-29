@@ -3,34 +3,45 @@ module HankelTransforms
 import GSL
 import LinearAlgebra
 
-
 export plan, htcoord, htfreq, dht!, dht, idht!, idht
 
+const htAbstractArray{T} = Union{AbstractArray{T}, AbstractArray{Complex{T}}}
 
-struct Plan{I<:Int, T<:AbstractFloat, U<:AbstractArray, U2<:AbstractArray}
+
+struct Plan{
+    I<:Int,
+    T<:AbstractFloat,
+    UA<:AbstractArray{T},
+    UB<:AbstractArray{T},
+    UC<:htAbstractArray{T},
+}
     N :: I
     R :: T
     V :: T
-    J :: U
-    TT :: U2
-    tmp :: U
+    J :: UA
+    TT :: UB
+    ftmp :: UC
 end
 
 
 function plan(
     R::T, A::U, p::I=0,
-) where {T<:AbstractFloat, U<:AbstractArray, I<:Int}
-    N = length(A)
+) where {T<:AbstractFloat, U<:htAbstractArray{T}, I<:Int}
+    dims = size(A)
+    N = dims[1]
 
-    a = @. GSL.sf_bessel_zero_Jnu(p, 1:N)
-    aNp1 = GSL.sf_bessel_zero_Jnu(p, N + 1)
+    a = zeros(T, N)
+    J = zeros(T, N)
+    TT = zeros(T, (N, N))
 
-    V = aNp1 / (2 * pi * R)
-    J = @. abs(GSL.sf_bessel_Jn(p + 1, a)) / R
+    @. a = GSL.sf_bessel_zero_Jnu(p, 1:N)
+    aNp1::T = GSL.sf_bessel_zero_Jnu(p, N + 1)
 
-    S = 2 * pi * R * V
+    V::T = aNp1 / (2 * pi * R)
+    @. J = abs(GSL.sf_bessel_Jn(p + 1, a)) / R
 
-    TT = similar(A, (N, N))
+    S::T = 2 * pi * R * V
+
     for i=1:N
     for j=1:N
         TT[i, j] = 2 * GSL.sf_bessel_Jn(p, a[i] * a[j] / S) /
@@ -39,9 +50,9 @@ function plan(
     end
     end
 
-    tmp = zero(J)
+    ftmp = zero(A)
 
-    return Plan(N, R, V, J, TT, tmp)
+    return Plan(N, R, V, J, TT, ftmp)
 end
 
 
@@ -70,10 +81,10 @@ end
 """
 Compute (in place) forward discrete Hankel transform.
 """
-function dht!(f::U, plan::Plan{I, T, U, U2}) where {I, T, U, U2}
+function dht!(f::UC, plan::Plan{I, T, UA, UB, UC}) where {I, T, UA, UB, UC}
     @. f = f * plan.R / plan.J
-    LinearAlgebra.mul!(plan.tmp, plan.TT, f)
-    @. f = plan.tmp * plan.J / plan.V
+    LinearAlgebra.mul!(plan.ftmp, plan.TT, f)
+    @. f = plan.ftmp * plan.J / plan.V
     return nothing
 end
 
@@ -81,7 +92,7 @@ end
 """
 Compute (out of place) forward discrete Hankel transform.
 """
-function dht(f1::U, plan::Plan{I, T, U, U2}) where {I, T, U, U2}
+function dht(f1::UC, plan::Plan{I, T, UA, UB, UC}) where {I, T, UA, UB, UC}
     f2 = copy(f1)
     dht!(f2, plan)
     return f2
@@ -91,10 +102,10 @@ end
 """
 Compute (in place) backward discrete Hankel transform.
 """
-function idht!(f::U, plan::Plan{I, T, U, U2}) where {I, T, U, U2}
+function idht!(f::UC, plan::Plan{I, T, UA, UB, UC}) where {I, T, UA, UB, UC}
     @. f = f * plan.V / plan.J
-    LinearAlgebra.mul!(plan.tmp, plan.TT, f)
-    @. f = plan.tmp * plan.J / plan.R
+    LinearAlgebra.mul!(plan.ftmp, plan.TT, f)
+    @. f = plan.ftmp * plan.J / plan.R
     return nothing
 end
 
@@ -102,7 +113,7 @@ end
 """
 Compute (out of place) backward discrete Hankel transform.
 """
-function idht(f2::U, plan::Plan{I, T, U, U2}) where {I, T, U, U2}
+function idht(f2::UC, plan::Plan{I, T, UA, UB, UC}) where {I, T, UA, UB, UC}
     f1 = copy(f2)
     idht!(f1, plan)
     return f1

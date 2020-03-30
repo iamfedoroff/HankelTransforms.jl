@@ -1,9 +1,23 @@
 import HankelTransforms
 using Test
 
+# Import GPU packages:
+import CUDAapi
+
+if CUDAapi.has_cuda()   # check that CUDA is installed
+if CUDAapi.has_cuda_gpu()   # check that GPU is active
+    try
+        import CuArrays   # we have CUDA, so this should not fail
+        CuArrays.allowscalar(false)   # disable slow fallback methods
+    catch ex
+        # something is wrong with the user's set-up (or there's a bug in CuArrays)
+        @warn "CUDA is installed, but CuArrays.jl fails to load"
+            exception = (ex, catch_backtrace())
+    end
+end
+end
+
 const gamma = 5.0
-const R = 3.0
-const N = 256
 
 
 function mysinc(r)
@@ -23,24 +37,14 @@ function mysinc_spectrum(v, p)
 end
 
 
-for p in [0, 1, 4]
-    v = HankelTransforms.htfreq(R, N, p)
-    r = HankelTransforms.htcoord(R, N, p)
-    f1 = @. mysinc(r)
-    f2th = @. mysinc_spectrum(v, p)
+@testset "CPU" begin
+    include("test_1d.jl")
+end
 
-    plan = HankelTransforms.plan(R, f1, p)
-    f2 = HankelTransforms.dht(f1, plan)
-    f3 = HankelTransforms.idht(f2, plan)
-
-    err = 20 * log10.(abs.(f2th .- f2) / maximum(abs.(f2)))
-
-    @test maximum(err) < 10
-    @test isapprox(f1, f3)
-
-    @allocated HankelTransforms.dht!(f1, plan)
-    @test (@allocated HankelTransforms.dht!(f1, plan)) == 0
-
-    @allocated HankelTransforms.idht!(f2, plan)
-    @test (@allocated HankelTransforms.idht!(f2, plan)) == 0
+@testset "GPU" begin
+    if CUDAapi.has_cuda()   # check that CUDA is installed
+    if CUDAapi.has_cuda_gpu()   # check that GPU is active
+        include("test_1d_gpu.jl")
+    end
+    end
 end

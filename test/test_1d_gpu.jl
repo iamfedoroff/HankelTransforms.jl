@@ -1,0 +1,26 @@
+for p in [0, 1, 4]
+    R = 3f0
+    N = 2048
+
+    v = HankelTransforms.htfreq(R, N, p)
+    r = HankelTransforms.htcoord(R, N, p)
+    f1 = @. mysinc(r)
+    f2th = @. mysinc_spectrum(v, p)
+
+    f1 = convert(Array{typeof(R)}, f1)
+    f2th = convert(Array{typeof(R)}, f2th)
+
+    f_gpu = CuArrays.CuArray(f1)
+    plan_gpu = HankelTransforms.plan(R, f_gpu, p)
+
+    HankelTransforms.dht!(f_gpu, plan_gpu)
+    f2 = CuArrays.collect(f_gpu)
+
+    HankelTransforms.idht!(f_gpu, plan_gpu)
+    f3 = CuArrays.collect(f_gpu)
+
+    err = 20 * log10.(abs.(f2th .- f2) / maximum(abs.(f2)))
+
+    @test maximum(err) < 10
+    @test isapprox(f1, f3)
+end

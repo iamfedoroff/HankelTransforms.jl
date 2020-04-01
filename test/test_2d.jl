@@ -1,11 +1,19 @@
 for p in [0, 1, 4]
     R = 3.0
-    N = 256
+    N1 = 256
+    N2 = 512
 
-    v = HankelTransforms.htfreq(R, N, p)
-    r = HankelTransforms.htcoord(R, N, p)
-    f1 = @. mysinc(r)
-    f2th = @. mysinc_spectrum(v, p)
+    v = HankelTransforms.htfreq(R, N1, p)
+    r = HankelTransforms.htcoord(R, N1, p)
+
+    f1 = zeros(typeof(R), (N1, N2))
+    f2th = zeros(typeof(R), (N1, N2))
+    for i=1:N1
+    for j=1:N2
+        f1[i, j] = mysinc(r[i])
+        f2th[i, j] = mysinc_spectrum(v[i], p)
+    end
+    end
 
     plan = HankelTransforms.plan(R, f1, p)
     f2 = HankelTransforms.dht(f1, plan)

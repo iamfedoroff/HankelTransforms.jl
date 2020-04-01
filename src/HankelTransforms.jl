@@ -3,8 +3,12 @@ module HankelTransforms
 import GSL
 import LinearAlgebra
 
-# Import GPU packages:
+
+# Import GPU packages ----------------------------------------------------------
+import CuArrays
 import CUDAapi
+import CUDAdrv
+import CUDAnative
 
 isongpu = function(T)
     return false
@@ -14,33 +18,24 @@ cuconvert = function(F)
     return F
 end
 
-if CUDAapi.has_cuda()   # check that CUDA is installed
-if CUDAapi.has_cuda_gpu()   # check that GPU is active
-    try
-        import CuArrays   # we have CUDA, so this should not fail
-        CuArrays.allowscalar(false)   # disable slow fallback methods
+# check that CUDA is installed and GPU is active:
+if CUDAapi.has_cuda_gpu()
+    CuArrays.allowscalar(false)   # disable slow fallback methods
 
-        global isongpu = function(T)
-            if T <: CuArrays.CuArray
-                IOG = true
-            else
-                IOG = false
-            end
-            return IOG
+    global isongpu = function(T)
+        if T <: CuArrays.CuArray
+            IOG = true
+        else
+            IOG = false
         end
+        return IOG
+    end
 
-        global cuconvert = function(F)
-            return CuArrays.CuArray(F)
-        end
-
-    catch ex
-        # something is wrong with the user's set-up (or there's a bug in CuArrays)
-        @warn "CUDA is installed, but CuArrays.jl fails to load"
-            exception = (ex, catch_backtrace())
-
+    global cuconvert = function(F)
+        return CuArrays.CuArray(F)
     end
 end
-end
+# ------------------------------------------------------------------------------
 
 
 export plan, htcoord, htfreq, dht!, dht, idht!, idht
@@ -130,14 +125,36 @@ end
 
 
 """
-Compute (in place) forward discrete Hankel transform.
+Compute (in place) forward discrete Hankel transform on CPU.
 """
 function dht!(
-    f::UF, plan::Plan{IOG, I, T, UJ, UT, UF},
-) where {IOG, I, T, UJ, UT, UF}
-    @. f = f * plan.R / plan.J
-    LinearAlgebra.mul!(plan.ftmp, plan.TT, f)
-    @. f = plan.ftmp * plan.J / plan.V
+    f::UF, plan::Plan{false, I, T, UJ, UT, UF},
+) where {I, T, UJ, UT, UF}
+    kernel(f, plan.R, plan.V, plan.J, plan.TT, plan.ftmp)
+    return nothing
+end
+
+
+"""
+Compute (in place) forward discrete Hankel transform on GPU.
+"""
+function dht!(
+    f::UF, plan::Plan{true, I, T, UJ, UT, UF},
+) where {I, T, UJ, UT, UF}
+    MAX_THREADS_PER_BLOCK = CUDAdrv.attribute(
+        CUDAnative.CuDevice(0), CUDAdrv.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
+    )
+    N = length(f)
+    nth = min(N, MAX_THREADS_PER_BLOCK)
+    nbl = cld(N, nth)
+    #
+    # CUDAnative.@cuda blocks=nbl threads=nth kernel123(
+    #     f, plan.R, plan.V, plan.J, plan.TT, plan.ftmp,
+    # )
+    #
+    CUDAnative.@cuda blocks=nbl threads=nth kernel1(f, plan.J, plan.R)
+    CUDAnative.@cuda blocks=nbl threads=nth kernel2(f, plan.ftmp, plan.TT)
+    CUDAnative.@cuda blocks=nbl threads=nth kernel3(f, plan.ftmp, plan.J, plan.V)
     return nothing
 end
 
@@ -155,14 +172,36 @@ end
 
 
 """
-Compute (in place) backward discrete Hankel transform.
+Compute (in place) backward discrete Hankel transform on CPU.
 """
 function idht!(
-    f::UF, plan::Plan{IOG, I, T, UJ, UT, UF},
-) where {IOG, I, T, UJ, UT, UF}
-    @. f = f * plan.V / plan.J
-    LinearAlgebra.mul!(plan.ftmp, plan.TT, f)
-    @. f = plan.ftmp * plan.J / plan.R
+    f::UF, plan::Plan{false, I, T, UJ, UT, UF},
+) where {I, T, UJ, UT, UF}
+    kernel(f, plan.V, plan.R, plan.J, plan.TT, plan.ftmp)
+    return nothing
+end
+
+
+"""
+Compute (in place) backward discrete Hankel transform on GPU.
+"""
+function idht!(
+    f::UF, plan::Plan{true, I, T, UJ, UT, UF},
+) where {I, T, UJ, UT, UF}
+    MAX_THREADS_PER_BLOCK = CUDAdrv.attribute(
+        CUDAnative.CuDevice(0), CUDAdrv.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
+    )
+    N = length(f)
+    nth = min(N, MAX_THREADS_PER_BLOCK)
+    nbl = cld(N, nth)
+    #
+    # CUDAnative.@cuda blocks=nbl threads=nth kernel123(
+    #     f, plan.V, plan.R, plan.J, plan.TT, plan.ftmp,
+    # )
+    #
+    CUDAnative.@cuda blocks=nbl threads=nth kernel1(f, plan.J, plan.V)
+    CUDAnative.@cuda blocks=nbl threads=nth kernel2(f, plan.ftmp, plan.TT)
+    CUDAnative.@cuda blocks=nbl threads=nth kernel3(f, plan.ftmp, plan.J, plan.R)
     return nothing
 end
 
@@ -176,6 +215,143 @@ function idht(
     ftmp = copy(f)
     idht!(ftmp, plan)
     return ftmp
+end
+
+
+function kernel(f, RV, VR, J, TT, ftmp)
+    # axis = 1
+    N = length(f)
+    dims = size(f)
+    Naxis = dims[1]   # Naxis = dims[axis]
+    cartesian = CartesianIndices(f)
+
+    for k=1:N
+        i = cartesian[k][1]   # i = cartesian[k][axis]
+        @inbounds f[k] = f[k] * RV / J[i]
+    end
+
+    for k=1:N
+        i = cartesian[k][1]   # i = cartesian[k][axis]
+        @inbounds ftmp[k] = 0
+        for m=1:Naxis
+            @inbounds ftmp[k] = ftmp[k] + TT[i, m] * f[m]
+            # Equivalent to
+            #     i2 = cartesian[k][2]
+            #     i3 = cartesian[k][3]
+            #     ...
+            #     ftmp[k] = ftmp[k] + TT[i, m] * f[m, i2, i3, ...]
+            # and works only for transform along the first axis.
+            # Other kernels (kernel1 and kernel2) work along any axis.
+        end
+    end
+
+    for k=1:N
+        i = cartesian[k][1]   # i = cartesian[k][axis]
+        @inbounds f[k] = ftmp[k] * J[i] / VR
+    end
+
+    return nothing
+end
+
+
+function kernel123(f, RV, VR, J, TT, ftmp)
+    id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
+         CUDAnative.threadIdx().x
+    stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
+
+    # axis = 1
+    N = length(f)
+    dims = size(f)
+    Naxis = dims[1]   # Naxis = dims[axis]
+    cartesian = CartesianIndices(f)
+
+    for k=id:stride:N
+        i = cartesian[k][1]   # i = cartesian[k][axis]
+        @inbounds f[k] = f[k] * RV / J[i]
+    end
+
+    CUDAnative.sync_threads()
+
+    for k=id:stride:N
+        i = cartesian[k][1]   # i = cartesian[k][axis]
+        @inbounds ftmp[k] = 0
+        for m=1:Naxis
+            @inbounds ftmp[k] = ftmp[k] + TT[i, m] * f[m]
+            # Equivalent to
+            #     i2 = cartesian[k][2]
+            #     i3 = cartesian[k][3]
+            #     ...
+            #     ftmp[k] = ftmp[k] + TT[i, m] * f[m, i2, i3, ...]
+            # and works only for transform along the first axis.
+            # Other kernels (kernel1 and kernel2) work along any axis.
+        end
+    end
+
+    CUDAnative.sync_threads()
+
+    for k=id:stride:N
+        i = cartesian[k][1]   # i = cartesian[k][axis]
+        @inbounds f[k] = ftmp[k] * J[i] / VR
+    end
+
+    return nothing
+end
+
+
+function kernel1(f, J, RV)
+    id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
+         CUDAnative.threadIdx().x
+    stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
+    # axis = 1
+    N = length(f)
+    cartesian = CartesianIndices(f)
+    for k=id:stride:N
+        i = cartesian[k][1]   # i = cartesian[k][axis]
+        @inbounds f[k] = f[k] * RV / J[i]
+    end
+    return nothing
+end
+
+
+function kernel2(f, ftmp, TT)
+    id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
+         CUDAnative.threadIdx().x
+    stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
+    # axis = 1
+    N = length(f)
+    dims = size(f)
+    Naxis = dims[1]   # Naxis = dims[axis]
+    cartesian = CartesianIndices(f)
+    for k=id:stride:N
+        i = cartesian[k][1]   # i = cartesian[k][axis]
+        @inbounds ftmp[k] = 0
+        for m=1:Naxis
+            @inbounds ftmp[k] = ftmp[k] + TT[i, m] * f[m]
+            # Equivalent to
+            #     i2 = cartesian[k][2]
+            #     i3 = cartesian[k][3]
+            #     ...
+            #     ftmp[k] = ftmp[k] + TT[i, m] * f[m, i2, i3, ...]
+            # and works only for transform along the first axis.
+            # Other kernels (kernel1 and kernel2) work along any axis.
+        end
+    end
+    return nothing
+end
+
+
+function kernel3(f, ftmp, J, RV)
+    id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
+         CUDAnative.threadIdx().x
+    stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
+    # axis = 1
+    N = length(f)
+    cartesian = CartesianIndices(f)
+    for k=id:stride:N
+        i = cartesian[k][1]   # i = cartesian[k][axis]
+        @inbounds f[k] = ftmp[k] * J[i] / RV
+    end
+    return nothing
 end
 
 

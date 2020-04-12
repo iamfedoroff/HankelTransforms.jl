@@ -7,8 +7,8 @@ for p in [0, 1, 4]
     f1 = @. mysinc(r)
     f2th = @. mysinc_spectrum(v, p)
 
-    f1 = convert(Array{typeof(R)}, f1)
-    f2th = convert(Array{typeof(R)}, f2th)
+    f1 = Array{typeof(R)}(f1)
+    f2th = Array{typeof(R)}(f2th)
 
     f_gpu = CuArrays.CuArray(f1)
     plan_gpu = HankelTransforms.plan(R, f_gpu, p)

@@ -26,6 +26,7 @@ end
 @testset "CPU" begin
     include("test_1d.jl")
     include("test_2d.jl")
+    include("test_2d_region.jl")
 end
 
 @testset "GPU" begin
@@ -35,5 +36,6 @@ end
         CuArrays.allowscalar(false)   # disable slow fallback methods
         include("test_1d_gpu.jl")
         include("test_2d_gpu.jl")
+        include("test_2d_gpu_region.jl")
     end
 end

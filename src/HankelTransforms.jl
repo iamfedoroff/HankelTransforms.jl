@@ -46,12 +46,14 @@ const htAbstractArray{T} = Union{AbstractArray{T}, AbstractArray{Complex{T}}}
 struct Plan{
     IOG,
     I<:Int,
+    CI<:CartesianIndices,
     T<:AbstractFloat,
     UJ<:AbstractArray{T},
     UT<:AbstractArray{T},
     UF<:htAbstractArray{T},
 }
     N :: I
+    region :: CI
     R :: T
     V :: T
     J :: UJ
@@ -61,9 +63,17 @@ end
 
 
 function plan(
-    R::T, F::UF, p::I=0,
-) where {T<:AbstractFloat, UF<:htAbstractArray{T}, I<:Int}
-    dims = size(F)
+    R::T, F::UF, p::Int=0,
+) where {T<:AbstractFloat, UF<:htAbstractArray{T}}
+    region = CartesianIndices(F)
+    return plan(R, F, region, p)
+end
+
+
+function plan(
+    R::T, F::UF, region::CI, p::I=0,
+) where {T<:AbstractFloat, UF<:htAbstractArray{T}, CI<:CartesianIndices, I<:Int}
+    dims = size(region)
     N = dims[1]
 
     a = zeros(T, N)
@@ -86,17 +96,18 @@ function plan(
     end
     end
 
-    ftmp = zero(F)
+    ftmp = zeros(T, dims)
 
     IOG = isongpu(UF)
     if IOG
         J = cuconvert(J)
         TT = cuconvert(TT)
+        ftmp = cuconvert(ftmp)
     end
     UJ = typeof(J)
     UT = typeof(TT)
 
-    return Plan{IOG, I, T, UJ, UT, UF}(N, R, V, J, TT, ftmp)
+    return Plan{IOG, I, CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
 end
 
 
@@ -128,8 +139,8 @@ end
 Compute (out of place) forward discrete Hankel transform.
 """
 function dht(
-    f::UF, plan::Plan{IOG, I, T, UJ, UT, UF},
-) where {IOG, I, T, UJ, UT, UF}
+    f::UF, plan::Plan{IOG, I, CI, T, UJ, UT, UF},
+) where {IOG, I, CI, T, UJ, UT, UF}
     ftmp = copy(f)
     dht!(ftmp, plan)
     return ftmp
@@ -140,8 +151,8 @@ end
 Compute (out of place) backward discrete Hankel transform.
 """
 function idht(
-    f::UF, plan::Plan{IOG, I, T, UJ, UT, UF},
-) where {IOG, I, T, UJ, UT, UF}
+    f::UF, plan::Plan{IOG, I, CI, T, UJ, UT, UF},
+) where {IOG, I, CI, T, UJ, UT, UF}
     ftmp = copy(f)
     idht!(ftmp, plan)
     return ftmp
@@ -155,11 +166,11 @@ end
 Compute (in place) forward discrete Hankel transform on CPU.
 """
 function dht!(
-    f::UF, plan::Plan{false, I, T, UJ, UT, UF},
-) where {I, T, UJ, UT, UF}
-    kernel1(f, plan.J, plan.R)
-    kernel2(f, plan.ftmp, plan.TT)
-    kernel3(f, plan.ftmp, plan.J, plan.V)
+    f::UF, plan::Plan{false, I, CI, T, UJ, UT, UF},
+) where {I, CI, T, UJ, UT, UF}
+    kernel1(f, plan.J, plan.R, plan.region)
+    kernel2(f, plan.ftmp, plan.TT, plan.region)
+    kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
     return nothing
 end
 
@@ -168,35 +179,32 @@ end
 Compute (in place) backward discrete Hankel transform on CPU.
 """
 function idht!(
-    f::UF, plan::Plan{false, I, T, UJ, UT, UF},
-) where {I, T, UJ, UT, UF}
-    kernel1(f, plan.J, plan.V)
-    kernel2(f, plan.ftmp, plan.TT)
-    kernel3(f, plan.ftmp, plan.J, plan.R)
+    f::UF, plan::Plan{false, I, CI, T, UJ, UT, UF},
+) where {I, CI, T, UJ, UT, UF}
+    kernel1(f, plan.J, plan.V, plan.region)
+    kernel2(f, plan.ftmp, plan.TT, plan.region)
+    kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
     return nothing
 end
 
 
-function kernel1(f, J, RV)
+function kernel1(f, J, RV, region)
     # axis = 1
-    N = length(f)
-    cartesian = CartesianIndices(f)
+    N = length(region)
     for k=1:N
-        i = cartesian[k][1]   # i = cartesian[k][axis]
+        i = region[k][1]   # i = region[k][axis]
         @inbounds f[k] = f[k] * RV / J[i]
     end
     return nothing
 end
 
 
-function kernel2(f::AbstractArray{T, 1}, ftmp, TT) where T
+function kernel2(f::AbstractArray{T, 1}, ftmp, TT, region) where T
     # axis = 1
-    N = length(f)
-    dims = size(f)
-    Naxis = dims[1]   # Naxis = dims[axis]
-    cartesian = CartesianIndices(f)
+    N = length(region)
+    Naxis = size(region)[1]   # Naxis = size(region)[axis]
     for k=1:N
-        i = cartesian[k][1]   # i = cartesian[k][axis]
+        i = region[k][1]   # i = region[k][axis]
         @inbounds ftmp[k] = 0
         for m=1:Naxis
             @inbounds ftmp[k] = ftmp[k] + TT[i, m] * f[m]
@@ -206,15 +214,13 @@ function kernel2(f::AbstractArray{T, 1}, ftmp, TT) where T
 end
 
 
-function kernel2(f::AbstractArray{T, 2}, ftmp, TT) where T
+function kernel2(f::AbstractArray{T, 2}, ftmp, TT, region) where T
     # axis = 1
-    N = length(f)
-    dims = size(f)
-    Naxis = dims[1]   # Naxis = dims[axis]
-    cartesian = CartesianIndices(f)
+    N = length(region)
+    Naxis = size(region)[1]   # Naxis = size(region)[axis]
     for k=1:N
-        i = cartesian[k][1]   # i = cartesian[k][axis]
-        j = cartesian[k][2]
+        i = region[k][1]   # i = region[k][axis]
+        j = region[k][2]
         @inbounds ftmp[k] = 0
         for m=1:Naxis
             @inbounds ftmp[k] = ftmp[k] + TT[i, m] * f[m, j]
@@ -224,12 +230,11 @@ function kernel2(f::AbstractArray{T, 2}, ftmp, TT) where T
 end
 
 
-function kernel3(f, ftmp, J, RV)
+function kernel3(f, ftmp, J, RV, region)
     # axis = 1
-    N = length(f)
-    cartesian = CartesianIndices(f)
+    N = length(region)
     for k=1:N
-        i = cartesian[k][1]   # i = cartesian[k][axis]
+        i = region[k][1]   # i = region[k][axis]
         @inbounds f[k] = ftmp[k] * J[i] / RV
     end
     return nothing
@@ -243,17 +248,17 @@ end
 Compute (in place) forward discrete Hankel transform on GPU.
 """
 function dht!(
-    f::UF, plan::Plan{true, I, T, UJ, UT, UF},
-) where {I, T, UJ, UT, UF}
+    f::UF, plan::Plan{true, I, CI, T, UJ, UT, UF},
+) where {I, CI, T, UJ, UT, UF}
     MAX_THREADS_PER_BLOCK = CUDAdrv.attribute(
         CUDAnative.CuDevice(0), CUDAdrv.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
     )
-    N = length(f)
+    N = length(plan.region)
     nth = min(N, MAX_THREADS_PER_BLOCK)
     nbl = cld(N, nth)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel1(f, plan.J, plan.R)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel2(f, plan.ftmp, plan.TT)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel3(f, plan.ftmp, plan.J, plan.V)
+    CUDAnative.@cuda blocks=nbl threads=nth kernel1(f, plan.J, plan.R, plan.region)
+    CUDAnative.@cuda blocks=nbl threads=nth kernel2(f, plan.ftmp, plan.TT, plan.region)
+    CUDAnative.@cuda blocks=nbl threads=nth kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
     return nothing
 end
 
@@ -262,47 +267,44 @@ end
 Compute (in place) backward discrete Hankel transform on GPU.
 """
 function idht!(
-    f::UF, plan::Plan{true, I, T, UJ, UT, UF},
-) where {I, T, UJ, UT, UF}
+    f::UF, plan::Plan{true, I, CI, T, UJ, UT, UF},
+) where {I, CI, T, UJ, UT, UF}
     MAX_THREADS_PER_BLOCK = CUDAdrv.attribute(
         CUDAnative.CuDevice(0), CUDAdrv.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
     )
-    N = length(f)
+    N = length(plan.region)
     nth = min(N, MAX_THREADS_PER_BLOCK)
     nbl = cld(N, nth)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel1(f, plan.J, plan.V)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel2(f, plan.ftmp, plan.TT)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel3(f, plan.ftmp, plan.J, plan.R)
+    CUDAnative.@cuda blocks=nbl threads=nth kernel1(f, plan.J, plan.V, plan.region)
+    CUDAnative.@cuda blocks=nbl threads=nth kernel2(f, plan.ftmp, plan.TT, plan.region)
+    CUDAnative.@cuda blocks=nbl threads=nth kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
     return nothing
 end
 
 
-function kernel1(f::CUDAnative.CuDeviceArray, J, RV)
+function kernel1(f::CUDAnative.CuDeviceArray, J, RV, region)
     id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
          CUDAnative.threadIdx().x
     stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
     # axis = 1
-    N = length(f)
-    cartesian = CartesianIndices(f)
+    N = length(region)
     for k=id:stride:N
-        i = cartesian[k][1]   # i = cartesian[k][axis]
+        i = region[k][1]   # i = region[k][axis]
         @inbounds f[k] = f[k] * RV / J[i]
     end
     return nothing
 end
 
 
-function kernel2(f::CUDAnative.CuDeviceArray{T, 1}, ftmp, TT) where T
+function kernel2(f::CUDAnative.CuDeviceArray{T, 1}, ftmp, TT, region) where T
     id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
          CUDAnative.threadIdx().x
     stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
     # axis = 1
-    N = length(f)
-    dims = size(f)
-    Naxis = dims[1]   # Naxis = dims[axis]
-    cartesian = CartesianIndices(f)
+    N = length(region)
+    Naxis = size(region)[1]   # Naxis = size(region)[axis]
     for k=id:stride:N
-        i = cartesian[k][1]   # i = cartesian[k][axis]
+        i = region[k][1]   # i = region[k][axis]
         @inbounds ftmp[k] = 0
         for m=1:Naxis
             @inbounds ftmp[k] = ftmp[k] + TT[i, m] * f[m]
@@ -312,18 +314,16 @@ function kernel2(f::CUDAnative.CuDeviceArray{T, 1}, ftmp, TT) where T
 end
 
 
-function kernel2(f::CUDAnative.CuDeviceArray{T, 2}, ftmp, TT) where T
+function kernel2(f::CUDAnative.CuDeviceArray{T, 2}, ftmp, TT, region) where T
     id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
          CUDAnative.threadIdx().x
     stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
     # axis = 1
-    N = length(f)
-    dims = size(f)
-    Naxis = dims[1]   # Naxis = dims[axis]
-    cartesian = CartesianIndices(f)
+    N = length(region)
+    Naxis = size(region)[1]   # Naxis = size(region)[axis]
     for k=id:stride:N
-        i = cartesian[k][1]   # i = cartesian[k][axis]
-        j = cartesian[k][2]
+        i = region[k][1]   # i = region[k][axis]
+        j = region[k][2]
         @inbounds ftmp[k] = 0
         for m=1:Naxis
             @inbounds ftmp[k] = ftmp[k] + TT[i, m] * f[m, j]
@@ -333,15 +333,14 @@ function kernel2(f::CUDAnative.CuDeviceArray{T, 2}, ftmp, TT) where T
 end
 
 
-function kernel3(f::CUDAnative.CuDeviceArray, ftmp, J, RV)
+function kernel3(f::CUDAnative.CuDeviceArray, ftmp, J, RV, region)
     id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
          CUDAnative.threadIdx().x
     stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
     # axis = 1
-    N = length(f)
-    cartesian = CartesianIndices(f)
+    N = length(region)
     for k=id:stride:N
-        i = cartesian[k][1]   # i = cartesian[k][axis]
+        i = region[k][1]   # i = region[k][axis]
         @inbounds f[k] = ftmp[k] * J[i] / RV
     end
     return nothing

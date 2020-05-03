@@ -1,6 +1,7 @@
 module HankelTransforms
 
 import GSL
+import JLD2
 import LinearAlgebra
 
 
@@ -63,16 +64,21 @@ end
 
 
 function plan(
-    R::T, F::UF, p::Int=0,
+    R::T, F::UF, p::Int=0; kwargs...,
 ) where {T<:AbstractFloat, UF<:htAbstractArray{T}}
     region = CartesianIndices(F)
-    return plan(R, F, region, p)
+    return plan(R, F, region, p; kwargs...)
 end
 
 
 function plan(
-    R::T, F::UF, region::CI, p::I=0,
-) where {T<:AbstractFloat, UF<:htAbstractArray{T}, CI<:CartesianIndices, I<:Int}
+    R::T,
+    F::UF,
+    region::CartesianIndices,
+    p::Int=0;
+    save::Bool=false,
+    fname::String="dht.jld2",
+) where {T<:AbstractFloat, UF<:htAbstractArray{T}}
     dims = size(region)
     N = dims[1]
 
@@ -88,12 +94,25 @@ function plan(
 
     S::T = 2 * pi * R * V
 
-    for i=1:N
     for j=1:N
+    for i=1:N
         TT[i, j] = 2 * GSL.sf_bessel_Jn(p, a[i] * a[j] / S) /
                    abs(GSL.sf_bessel_Jn(p + 1, a[i])) /
                    abs(GSL.sf_bessel_Jn(p + 1, a[j])) / S
     end
+    end
+
+    if save
+        fp = JLD2.jldopen(fname, "w")
+        fp["T"] = T
+        fp["UF"] = UF
+        fp["N"] = N
+        fp["region"] = region
+        fp["R"] = R
+        fp["V"] = V
+        fp["J"] = J
+        fp["TT"] = TT
+        JLD2.close(fp)
     end
 
     ftmp = zeros(T, dims)
@@ -104,9 +123,41 @@ function plan(
         TT = cuconvert(TT)
         ftmp = cuconvert(ftmp)
     end
+
+    I = typeof(N)
+    CI = typeof(region)
     UJ = typeof(J)
     UT = typeof(TT)
+    return Plan{IOG, I, CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
+end
 
+
+function plan(fname::String)
+    fp = JLD2.jldopen(fname, "r")
+    T = fp["T"]
+    UF = fp["UF"]
+    N = fp["N"]
+    region = fp["region"]
+    R = fp["R"]
+    V = fp["V"]
+    J = fp["J"]
+    TT = fp["TT"]
+    JLD2.close(fp)
+
+    dims = size(region)
+    ftmp = zeros(T, dims)
+
+    IOG = isongpu(UF)
+    if IOG
+        J = cuconvert(J)
+        TT = cuconvert(TT)
+        ftmp = cuconvert(ftmp)
+    end
+
+    I = typeof(N)
+    CI = typeof(region)
+    UJ = typeof(J)
+    UT = typeof(TT)
     return Plan{IOG, I, CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
 end
 

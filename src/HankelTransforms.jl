@@ -301,15 +301,18 @@ Compute (in place) forward discrete Hankel transform on GPU.
 function dht!(
     f::UF, plan::Plan{true, I, CI, T, UJ, UT, UF},
 ) where {I, CI, T, UJ, UT, UF}
-    MAX_THREADS_PER_BLOCK = CUDAdrv.attribute(
-        CUDAnative.CuDevice(0), CUDAdrv.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
-    )
     N = length(plan.region)
-    nth = min(N, MAX_THREADS_PER_BLOCK)
-    nbl = cld(N, nth)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel1(f, plan.J, plan.R, plan.region)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel2(f, plan.ftmp, plan.TT, plan.region)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
+
+    function get_config(kernel)
+        fun = kernel.fun
+        config = CUDAdrv.launch_configuration(fun)
+        blocks = cld(N, config.threads)
+        return (threads=config.threads, blocks=blocks)
+    end
+
+    CUDAnative.@cuda config=get_config kernel1(f, plan.J, plan.R, plan.region)
+    CUDAnative.@cuda config=get_config kernel2(f, plan.ftmp, plan.TT, plan.region)
+    CUDAnative.@cuda config=get_config kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
     return nothing
 end
 
@@ -320,15 +323,18 @@ Compute (in place) backward discrete Hankel transform on GPU.
 function idht!(
     f::UF, plan::Plan{true, I, CI, T, UJ, UT, UF},
 ) where {I, CI, T, UJ, UT, UF}
-    MAX_THREADS_PER_BLOCK = CUDAdrv.attribute(
-        CUDAnative.CuDevice(0), CUDAdrv.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK,
-    )
     N = length(plan.region)
-    nth = min(N, MAX_THREADS_PER_BLOCK)
-    nbl = cld(N, nth)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel1(f, plan.J, plan.V, plan.region)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel2(f, plan.ftmp, plan.TT, plan.region)
-    CUDAnative.@cuda blocks=nbl threads=nth kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
+
+    function get_config(kernel)
+        fun = kernel.fun
+        config = CUDAdrv.launch_configuration(fun)
+        blocks = cld(N, config.threads)
+        return (threads=config.threads, blocks=blocks)
+    end
+
+    CUDAnative.@cuda config=get_config kernel1(f, plan.J, plan.V, plan.region)
+    CUDAnative.@cuda config=get_config kernel2(f, plan.ftmp, plan.TT, plan.region)
+    CUDAnative.@cuda config=get_config kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
     return nothing
 end
 

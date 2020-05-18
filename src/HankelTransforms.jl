@@ -1,6 +1,5 @@
 module HankelTransforms
 
-import GSL
 import JLD2
 import LinearAlgebra
 
@@ -36,6 +35,19 @@ if CUDAapi.has_cuda_gpu()
         return CuArrays.CuArray(F)
     end
 end
+
+
+# Bessel functions -------------------------------------------------------------
+# GSL is the Julia wrapper for the GNU Scientific Library (GSL) and does not
+# work under Windows.
+# import GSL
+# bessel(p, x) = GSL.sf_bessel_Jn(p, x)
+# bessel_zero(p, n) = GSL.sf_bessel_zero_Jnu(p, n)
+
+import FunctionZeros
+import SpecialFunctions
+bessel(p, x) = SpecialFunctions.besselj(p, x)
+bessel_zero(p, n) = FunctionZeros.besselj_zero(p, n)
 # ------------------------------------------------------------------------------
 
 
@@ -86,19 +98,19 @@ function plan(
     J = zeros(T, N)
     TT = zeros(T, (N, N))
 
-    @. a = GSL.sf_bessel_zero_Jnu(p, 1:N)
-    aNp1::T = GSL.sf_bessel_zero_Jnu(p, N + 1)
+    @. a = bessel_zero(p, 1:N)
+    aNp1::T = bessel_zero(p, N + 1)
 
     V::T = aNp1 / (2 * pi * R)
-    @. J = abs(GSL.sf_bessel_Jn(p + 1, a)) / R
+    @. J = abs(bessel(p + 1, a)) / R
 
     S::T = 2 * pi * R * V
 
     for j=1:N
     for i=1:N
-        TT[i, j] = 2 * GSL.sf_bessel_Jn(p, a[i] * a[j] / S) /
-                   abs(GSL.sf_bessel_Jn(p + 1, a[i])) /
-                   abs(GSL.sf_bessel_Jn(p + 1, a[j])) / S
+        TT[i, j] = 2 * bessel(p, a[i] * a[j] / S) /
+                   abs(bessel(p + 1, a[i])) /
+                   abs(bessel(p + 1, a[j])) / S
     end
     end
 
@@ -167,8 +179,8 @@ Compute the spatial coordinates for Hankel transform.
 """
 function htcoord(R::T, N::I, p::I=0) where {T<:AbstractFloat, I<:Int}
     a = zeros(T, N)
-    @. a = GSL.sf_bessel_zero_Jnu(p, 1:N)
-    aNp1::T = GSL.sf_bessel_zero_Jnu(p, N + 1)
+    @. a = bessel_zero(p, 1:N)
+    aNp1::T = bessel_zero(p, N + 1)
     V::T = aNp1 / (2 * pi * R)
     @. a = a / (2 * pi * V)   # resuse the same array to avoid allocations
     return a
@@ -180,7 +192,7 @@ Compute the spatial frequencies (ordinary, not angular) for Hankel transform.
 """
 function htfreq(R::T, N::I, p::I=0) where {T<:AbstractFloat, I<:Int}
     a = zeros(T, N)
-    @. a = GSL.sf_bessel_zero_Jnu(p, 1:N)
+    @. a = bessel_zero(p, 1:N)
     @. a = a / (2 * pi * R)   # resuse the same array to avoid allocations
     return a
 end

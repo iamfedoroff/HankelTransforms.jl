@@ -1,6 +1,7 @@
 import HankelTransforms
 
-import CUDAapi
+# import CUDAapi
+import CUDA
 using Test
 
 const gamma = 5.0
@@ -32,9 +33,8 @@ end
 
 @testset "GPU" begin
     # check that CUDA is installed and GPU is active:
-    if CUDAapi.has_cuda_gpu()
-        import CuArrays
-        CuArrays.allowscalar(false)   # disable slow fallback methods
+    if CUDA.has_cuda_gpu()
+        CUDA.allowscalar(false)   # disable slow fallback methods
         include("test_1d_gpu.jl")
         include("test_2d_gpu.jl")
         include("test_2d_region_gpu.jl")

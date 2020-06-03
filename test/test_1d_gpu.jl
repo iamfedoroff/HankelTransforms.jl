@@ -10,14 +10,14 @@ for p in [0, 1, 4]
     f1 = Array{typeof(R)}(f1)
     f2th = Array{typeof(R)}(f2th)
 
-    f_gpu = CuArrays.CuArray(f1)
+    f_gpu = CUDA.CuArray(f1)
     plan_gpu = HankelTransforms.plan(R, f_gpu, p)
 
     HankelTransforms.dht!(f_gpu, plan_gpu)
-    f2 = CuArrays.collect(f_gpu)
+    f2 = CUDA.collect(f_gpu)
 
     HankelTransforms.idht!(f_gpu, plan_gpu)
-    f3 = CuArrays.collect(f_gpu)
+    f3 = CUDA.collect(f_gpu)
 
     err = 20 * log10.(abs.(f2th .- f2) / maximum(abs.(f2)))
 

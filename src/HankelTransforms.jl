@@ -4,11 +4,8 @@ import JLD2
 import LinearAlgebra
 
 
-# Import GPU packages ----------------------------------------------------------
-import CuArrays
-import CUDAapi
-import CUDAdrv
-import CUDAnative
+# CPU / GPU specific functions -------------------------------------------------
+import CUDA
 
 isongpu = function(T)
     return false
@@ -19,11 +16,11 @@ cuconvert = function(F)
 end
 
 # check that CUDA is installed and GPU is active:
-if CUDAapi.has_cuda_gpu()
-    CuArrays.allowscalar(false)   # disable slow fallback methods
+if CUDA.has_cuda_gpu()
+    CUDA.allowscalar(false)   # disable slow fallback methods
 
     global isongpu = function(T)
-        if T <: CuArrays.CuArray
+        if T <: CUDA.CuArray
             IOG = true
         else
             IOG = false
@@ -32,7 +29,7 @@ if CUDAapi.has_cuda_gpu()
     end
 
     global cuconvert = function(F)
-        return CuArrays.CuArray(F)
+        return CUDA.CuArray(F)
     end
 end
 
@@ -317,14 +314,14 @@ function dht!(
 
     function get_config(kernel)
         fun = kernel.fun
-        config = CUDAdrv.launch_configuration(fun)
+        config = CUDA.launch_configuration(fun)
         blocks = cld(N, config.threads)
         return (threads=config.threads, blocks=blocks)
     end
 
-    CUDAnative.@cuda config=get_config kernel1(f, plan.J, plan.R, plan.region)
-    CUDAnative.@cuda config=get_config kernel2(f, plan.ftmp, plan.TT, plan.region)
-    CUDAnative.@cuda config=get_config kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
+    CUDA.@cuda config=get_config kernel1(f, plan.J, plan.R, plan.region)
+    CUDA.@cuda config=get_config kernel2(f, plan.ftmp, plan.TT, plan.region)
+    CUDA.@cuda config=get_config kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
     return nothing
 end
 
@@ -339,22 +336,21 @@ function idht!(
 
     function get_config(kernel)
         fun = kernel.fun
-        config = CUDAdrv.launch_configuration(fun)
+        config = CUDA.launch_configuration(fun)
         blocks = cld(N, config.threads)
         return (threads=config.threads, blocks=blocks)
     end
 
-    CUDAnative.@cuda config=get_config kernel1(f, plan.J, plan.V, plan.region)
-    CUDAnative.@cuda config=get_config kernel2(f, plan.ftmp, plan.TT, plan.region)
-    CUDAnative.@cuda config=get_config kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
+    CUDA.@cuda config=get_config kernel1(f, plan.J, plan.V, plan.region)
+    CUDA.@cuda config=get_config kernel2(f, plan.ftmp, plan.TT, plan.region)
+    CUDA.@cuda config=get_config kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
     return nothing
 end
 
 
-function kernel1(f::CUDAnative.CuDeviceArray, J, RV, region)
-    id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
-         CUDAnative.threadIdx().x
-    stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
+function kernel1(f::CUDA.CuDeviceArray, J, RV, region)
+    id = (CUDA.blockIdx().x - 1) * CUDA.blockDim().x + CUDA.threadIdx().x
+    stride = CUDA.blockDim().x * CUDA.gridDim().x
     # axis = 1
     N = length(region)
     for k=id:stride:N
@@ -365,10 +361,9 @@ function kernel1(f::CUDAnative.CuDeviceArray, J, RV, region)
 end
 
 
-function kernel2(f::CUDAnative.CuDeviceArray{T, 1}, ftmp, TT, region) where T
-    id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
-         CUDAnative.threadIdx().x
-    stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
+function kernel2(f::CUDA.CuDeviceArray{T, 1}, ftmp, TT, region) where T
+    id = (CUDA.blockIdx().x - 1) * CUDA.blockDim().x + CUDA.threadIdx().x
+    stride = CUDA.blockDim().x * CUDA.gridDim().x
     # axis = 1
     N = length(region)
     Naxis = size(region)[1]   # Naxis = size(region)[axis]
@@ -383,10 +378,9 @@ function kernel2(f::CUDAnative.CuDeviceArray{T, 1}, ftmp, TT, region) where T
 end
 
 
-function kernel2(f::CUDAnative.CuDeviceArray{T, 2}, ftmp, TT, region) where T
-    id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
-         CUDAnative.threadIdx().x
-    stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
+function kernel2(f::CUDA.CuDeviceArray{T, 2}, ftmp, TT, region) where T
+    id = (CUDA.blockIdx().x - 1) * CUDA.blockDim().x + CUDA.threadIdx().x
+    stride = CUDA.blockDim().x * CUDA.gridDim().x
     # axis = 1
     N = length(region)
     Naxis = size(region)[1]   # Naxis = size(region)[axis]
@@ -402,10 +396,9 @@ function kernel2(f::CUDAnative.CuDeviceArray{T, 2}, ftmp, TT, region) where T
 end
 
 
-function kernel3(f::CUDAnative.CuDeviceArray, ftmp, J, RV, region)
-    id = (CUDAnative.blockIdx().x - 1) * CUDAnative.blockDim().x +
-         CUDAnative.threadIdx().x
-    stride = CUDAnative.blockDim().x * CUDAnative.gridDim().x
+function kernel3(f::CUDA.CuDeviceArray, ftmp, J, RV, region)
+    id = (CUDA.blockIdx().x - 1) * CUDA.blockDim().x + CUDA.threadIdx().x
+    stride = CUDA.blockDim().x * CUDA.gridDim().x
     # axis = 1
     N = length(region)
     for k=id:stride:N

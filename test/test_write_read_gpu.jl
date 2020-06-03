@@ -3,7 +3,7 @@ N = 1024
 
 r = HankelTransforms.htcoord(R, N)
 f = @. mysinc(r)
-f = CuArrays.CuArray{typeof(R)}(f)
+f = CUDA.CuArray{typeof(R)}(f)
 
 planw = HankelTransforms.plan(R, f, save=true)
 planr = HankelTransforms.plan("dht.jld2")

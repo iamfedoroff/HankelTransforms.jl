@@ -17,15 +17,15 @@ for p in [0, 1, 4]
     end
     end
 
-    f_gpu = CuArrays.CuArray(f1)
+    f_gpu = CUDA.CuArray(f1)
     region = CartesianIndices((N1, N2half))
     plan_gpu = HankelTransforms.plan(R, f_gpu, region, p)
 
     HankelTransforms.dht!(f_gpu, plan_gpu)
-    f2 = CuArrays.collect(f_gpu)
+    f2 = CUDA.collect(f_gpu)
 
     HankelTransforms.idht!(f_gpu, plan_gpu)
-    f3 = CuArrays.collect(f_gpu)
+    f3 = CUDA.collect(f_gpu)
 
     err = 20 * log10.(abs.(f2th .- f2) / maximum(abs.(f2)))
 

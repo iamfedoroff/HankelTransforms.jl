@@ -1,5 +1,6 @@
 module HankelTransforms
 
+import Base: *, \
 import JLD2
 import LinearAlgebra
 
@@ -195,6 +196,24 @@ function htfreq(R::T, N::I, p::I=0) where {T<:AbstractFloat, I<:Int}
 end
 
 
+# ******************************************************************************
+# AbstractFFTs API
+# ******************************************************************************
+function *(plan::Plan, f::AbstractArray)
+    dht!(f, plan)
+    return nothing
+end
+
+
+function \(plan::Plan, f::AbstractArray)
+    idht!(f, plan)
+    return nothing
+end
+
+
+# ******************************************************************************
+# Out of place functions
+# ******************************************************************************
 """
 Compute (out of place) forward discrete Hankel transform.
 """

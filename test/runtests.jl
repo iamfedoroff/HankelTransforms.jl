@@ -29,6 +29,7 @@ end
     include("test_2d.jl")
     include("test_2d_region.jl")
     include("test_write_read.jl")
+    include("test_abstractffts_api.jl")
 end
 
 @testset "GPU" begin
@@ -39,5 +40,6 @@ end
         include("test_2d_gpu.jl")
         include("test_2d_region_gpu.jl")
         include("test_write_read_gpu.jl")
+        include("test_abstractffts_api_gpu.jl")
     end
 end

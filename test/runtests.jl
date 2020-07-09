@@ -33,8 +33,7 @@ end
 end
 
 @testset "GPU" begin
-    # check that CUDA is installed and GPU is active:
-    if CUDA.has_cuda_gpu()
+    if CUDA.functional()
         CUDA.allowscalar(false)   # disable slow fallback methods
         include("test_1d_gpu.jl")
         include("test_2d_gpu.jl")

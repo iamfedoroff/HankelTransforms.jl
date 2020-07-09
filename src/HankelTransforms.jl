@@ -8,30 +8,21 @@ import LinearAlgebra
 # CPU / GPU specific functions -------------------------------------------------
 import CUDA
 
-isongpu = function(T)
-    return false
-end
-
-cuconvert = function(F)
-    return F
-end
-
-# check that CUDA is installed and GPU is active:
-if CUDA.has_cuda_gpu()
+if CUDA.functional()
     CUDA.allowscalar(false)   # disable slow fallback methods
+    cuconvert(F::AbstractArray) = CUDA.CuArray(F)
+else
+    cuconvert(F::AbstractArray) = F
+end
 
-    global isongpu = function(T)
-        if T <: CUDA.CuArray
-            IOG = true
-        else
-            IOG = false
-        end
-        return IOG
-    end
 
-    global cuconvert = function(F)
-        return CUDA.CuArray(F)
+function isongpu(T)
+    if T <: CUDA.CuArray
+        IOG = true
+    else
+        IOG = false
     end
+    return IOG
 end
 
 

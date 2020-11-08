@@ -8,13 +8,6 @@ import LinearAlgebra
 # CPU / GPU specific functions -------------------------------------------------
 import CUDA
 
-if CUDA.functional()
-    CUDA.allowscalar(false)   # disable slow fallback methods
-    cuconvert(F::AbstractArray) = CUDA.CuArray(F)
-else
-    cuconvert(F::AbstractArray) = F
-end
-
 
 function isongpu(T)
     if T <: CUDA.CuArray
@@ -120,9 +113,9 @@ function plan(
 
     IOG = isongpu(UF)
     if IOG
-        J = cuconvert(J)
-        TT = cuconvert(TT)
-        ftmp = cuconvert(ftmp)
+        J = CUDA.CuArray(J)
+        TT = CUDA.CuArray(TT)
+        ftmp = CUDA.CuArray(ftmp)
     end
 
     I = typeof(N)
@@ -150,9 +143,9 @@ function plan(fname::String)
 
     IOG = isongpu(UF)
     if IOG
-        J = cuconvert(J)
-        TT = cuconvert(TT)
-        ftmp = cuconvert(ftmp)
+        J = CUDA.CuArray(J)
+        TT = CUDA.CuArray(TT)
+        ftmp = CUDA.CuArray(ftmp)
     end
 
     I = typeof(N)

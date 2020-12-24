@@ -40,14 +40,13 @@ const htAbstractArray{T} = Union{AbstractArray{T}, AbstractArray{Complex{T}}}
 
 struct Plan{
     IOG,
-    I<:Int,
     CI<:CartesianIndices,
     T<:AbstractFloat,
     UJ<:AbstractArray{T},
     UT<:AbstractArray{T},
     UF<:htAbstractArray{T},
 }
-    N :: I
+    N :: Int
     region :: CI
     R :: T
     V :: T
@@ -118,11 +117,10 @@ function plan(
         ftmp = CUDA.CuArray(ftmp)
     end
 
-    I = typeof(N)
     CI = typeof(region)
     UJ = typeof(J)
     UT = typeof(TT)
-    return Plan{IOG, I, CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
+    return Plan{IOG, CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
 end
 
 
@@ -148,11 +146,10 @@ function plan(fname::String)
         ftmp = CUDA.CuArray(ftmp)
     end
 
-    I = typeof(N)
     CI = typeof(region)
     UJ = typeof(J)
     UT = typeof(TT)
-    return Plan{IOG, I, CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
+    return Plan{IOG, CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
 end
 
 
@@ -202,8 +199,8 @@ end
 Compute (out of place) forward discrete Hankel transform.
 """
 function dht(
-    f::UF, plan::Plan{IOG, I, CI, T, UJ, UT, UF},
-) where {IOG, I, CI, T, UJ, UT, UF}
+    f::UF, plan::Plan{IOG, CI, T, UJ, UT, UF},
+) where {IOG, CI, T, UJ, UT, UF}
     ftmp = copy(f)
     dht!(ftmp, plan)
     return ftmp
@@ -214,8 +211,8 @@ end
 Compute (out of place) backward discrete Hankel transform.
 """
 function idht(
-    f::UF, plan::Plan{IOG, I, CI, T, UJ, UT, UF},
-) where {IOG, I, CI, T, UJ, UT, UF}
+    f::UF, plan::Plan{IOG, CI, T, UJ, UT, UF},
+) where {IOG, CI, T, UJ, UT, UF}
     ftmp = copy(f)
     idht!(ftmp, plan)
     return ftmp
@@ -229,8 +226,8 @@ end
 Compute (in place) forward discrete Hankel transform on CPU.
 """
 function dht!(
-    f::UF, plan::Plan{false, I, CI, T, UJ, UT, UF},
-) where {I, CI, T, UJ, UT, UF}
+    f::UF, plan::Plan{false, CI, T, UJ, UT, UF},
+) where {CI, T, UJ, UT, UF}
     kernel1(f, plan.J, plan.R, plan.region)
     kernel2(f, plan.ftmp, plan.TT, plan.region)
     kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
@@ -242,8 +239,8 @@ end
 Compute (in place) backward discrete Hankel transform on CPU.
 """
 function idht!(
-    f::UF, plan::Plan{false, I, CI, T, UJ, UT, UF},
-) where {I, CI, T, UJ, UT, UF}
+    f::UF, plan::Plan{false, CI, T, UJ, UT, UF},
+) where {CI, T, UJ, UT, UF}
     kernel1(f, plan.J, plan.V, plan.region)
     kernel2(f, plan.ftmp, plan.TT, plan.region)
     kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
@@ -311,8 +308,8 @@ end
 Compute (in place) forward discrete Hankel transform on GPU.
 """
 function dht!(
-    f::UF, plan::Plan{true, I, CI, T, UJ, UT, UF},
-) where {I, CI, T, UJ, UT, UF}
+    f::UF, plan::Plan{true, CI, T, UJ, UT, UF},
+) where {CI, T, UJ, UT, UF}
     N = length(plan.region)
 
     function get_config(kernel)
@@ -333,8 +330,8 @@ end
 Compute (in place) backward discrete Hankel transform on GPU.
 """
 function idht!(
-    f::UF, plan::Plan{true, I, CI, T, UJ, UT, UF},
-) where {I, CI, T, UJ, UT, UF}
+    f::UF, plan::Plan{true, CI, T, UJ, UT, UF},
+) where {CI, T, UJ, UT, UF}
     N = length(plan.region)
 
     function get_config(kernel)

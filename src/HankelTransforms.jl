@@ -19,6 +19,25 @@ function isongpu(T)
 end
 
 
+macro krun(ex...)
+    N = ex[1]
+    call = ex[2]
+
+    args = call.args[2:end]
+
+    @gensym kernel config threads blocks
+    code = quote
+        local $kernel = CUDA.@cuda launch=false $call
+        local $config = CUDA.launch_configuration($kernel.fun)
+        local $threads = min($N, $config.threads)
+        local $blocks = cld($N, $threads)
+        $kernel($(args...); threads=$threads, blocks=$blocks)
+    end
+
+    return esc(code)
+end
+
+
 # Bessel functions -------------------------------------------------------------
 # GSL is the Julia wrapper for the GNU Scientific Library (GSL) and does not
 # work under Windows.
@@ -311,17 +330,9 @@ function dht!(
     f::UF, plan::Plan{true, CI, T, UJ, UT, UF},
 ) where {CI, T, UJ, UT, UF}
     N = length(plan.region)
-
-    function get_config(kernel)
-        fun = kernel.fun
-        config = CUDA.launch_configuration(fun)
-        blocks = cld(N, config.threads)
-        return (threads=config.threads, blocks=blocks)
-    end
-
-    CUDA.@cuda config=get_config kernel1(f, plan.J, plan.R, plan.region)
-    CUDA.@cuda config=get_config kernel2(f, plan.ftmp, plan.TT, plan.region)
-    CUDA.@cuda config=get_config kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
+    @krun N kernel1(f, plan.J, plan.R, plan.region)
+    @krun N kernel2(f, plan.ftmp, plan.TT, plan.region)
+    @krun N kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
     return nothing
 end
 
@@ -333,17 +344,9 @@ function idht!(
     f::UF, plan::Plan{true, CI, T, UJ, UT, UF},
 ) where {CI, T, UJ, UT, UF}
     N = length(plan.region)
-
-    function get_config(kernel)
-        fun = kernel.fun
-        config = CUDA.launch_configuration(fun)
-        blocks = cld(N, config.threads)
-        return (threads=config.threads, blocks=blocks)
-    end
-
-    CUDA.@cuda config=get_config kernel1(f, plan.J, plan.V, plan.region)
-    CUDA.@cuda config=get_config kernel2(f, plan.ftmp, plan.TT, plan.region)
-    CUDA.@cuda config=get_config kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
+    @krun N kernel1(f, plan.J, plan.V, plan.region)
+    @krun N kernel2(f, plan.ftmp, plan.TT, plan.region)
+    @krun N kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
     return nothing
 end
 

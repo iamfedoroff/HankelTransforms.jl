@@ -114,19 +114,6 @@ function plan(
     end
     end
 
-    if save
-        fp = JLD2.jldopen(fname, "w")
-        fp["T"] = T
-        fp["UF"] = UF
-        fp["N"] = N
-        fp["region"] = region
-        fp["R"] = R
-        fp["V"] = V
-        fp["J"] = J
-        fp["TT"] = TT
-        JLD2.close(fp)
-    end
-
     ftmp = zeros(T, dims)
 
     IOG = isongpu(UF)
@@ -139,36 +126,20 @@ function plan(
     CI = typeof(region)
     UJ = typeof(J)
     UT = typeof(TT)
-    return Plan{IOG, CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
+    plan = Plan{IOG, CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
+
+    if save
+        JLD2.@save fname plan
+    end
+
+    return plan
 end
 
 
 function plan(fname::String)
-    fp = JLD2.jldopen(fname, "r")
-    T = fp["T"]
-    UF = fp["UF"]
-    N = fp["N"]
-    region = fp["region"]
-    R = fp["R"]
-    V = fp["V"]
-    J = fp["J"]
-    TT = fp["TT"]
-    JLD2.close(fp)
-
-    dims = size(region)
-    ftmp = zeros(T, dims)
-
-    IOG = isongpu(UF)
-    if IOG
-        J = CUDA.CuArray(J)
-        TT = CUDA.CuArray(TT)
-        ftmp = CUDA.CuArray(ftmp)
-    end
-
-    CI = typeof(region)
-    UJ = typeof(J)
-    UT = typeof(TT)
-    return Plan{IOG, CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
+    plan = nothing
+    JLD2.@load fname plan
+    return plan
 end
 
 

@@ -45,10 +45,30 @@ end
 # bessel(p, x) = GSL.sf_bessel_Jn(p, x)
 # bessel_zero(p, n) = GSL.sf_bessel_zero_Jnu(p, n)
 
-import FunctionZeros
 import SpecialFunctions
 bessel(p, x) = SpecialFunctions.besselj(p, x)
-bessel_zero(p, n) = FunctionZeros.besselj_zero(p, n)
+
+# import FunctionZeros
+# bessel_zero(p, n) = FunctionZeros.besselj_zero(p, n)
+
+# Since FunctionZeros package is too slow in updating of versions for
+# SpecialFunctions, I copy all necessary functions here:
+
+import Roots
+
+# Asymptotic formula for the n'th zero of Bessel J function of order nu
+besselj_zero_asymptotic(nu, n) = pi * (n - 1 + nu / 2 + 3//4)
+
+# Use the asymptotic values as starting values. These find the correct zeros
+# even for n = 1,2,... Order 0 is 6 times slower and 50-100 times less accurate
+# than higher orders, with other parameters constant.
+besselj_zero(nu, n; order=2) =
+    Roots.fzero(
+        (x) -> SpecialFunctions.besselj(nu, x),
+        besselj_zero_asymptotic(nu, n); order=order
+    )
+
+bessel_zero(p, n) = besselj_zero(p, n)
 # ------------------------------------------------------------------------------
 
 

@@ -59,7 +59,15 @@ function test(R, p, s, dim; atype=Float64, cuda=false, region=nothing)
 
     @test isapprox(A1, A3)
 
-    if !cuda
+    if cuda
+        CUDA.@allocated dht!(A2, ht)
+        @test (CUDA.@allocated dht!(A2, ht)) == 0
+        # @show (CUDA.@allocated dht!(A2, ht))
+
+        CUDA.@allocated idht!(A3, ht)
+        @test (CUDA.@allocated idht!(A3, ht)) == 0
+        # @show (CUDA.@allocated idht!(A3, ht))
+    else
         @allocated dht!(A2, ht)
         @test (@allocated dht!(A2, ht)) == 0
         # @show (@allocated dht!(A2, ht))
@@ -94,14 +102,14 @@ N = 256
 
     # Different types:
     # 1D:
-    # test(R, 0, (N, ), 1; atype=Float32)
-    # test(R, 0, (N, ), 1; atype=Complex{Float32})
-    # test(R, 0, (N, ), 1; atype=Complex{Float64})
+    test(R, 0, (N, ), 1; atype=Float32)
+    test(R, 0, (N, ), 1; atype=Complex{Float32})
+    test(R, 0, (N, ), 1; atype=Complex{Float64})
 
     # 2D:
-    # test(R, 0, (N, 64), 1; atype=Float32)
-    # test(R, 0, (N, 64), 1; atype=Complex{Float32})
-    # test(R, 0, (N, 64), 1; atype=Complex{Float64})
+    test(R, 0, (N, 64), 1; atype=Float32)
+    test(R, 0, (N, 64), 1; atype=Complex{Float32})
+    test(R, 0, (N, 64), 1; atype=Complex{Float64})
 
     # 3D:
     # test(R, 0, (N, 32, 64), 1; atype=Float32)
@@ -151,12 +159,10 @@ end
 
         for p in [0, 1, 4]
             # 1D:
-            # test(R, p, (N, ), 1; atype=Float32, cuda=true)
-            test(R, p, (N, ), 1; atype=Float64, cuda=true)
+            test(R, p, (N, ), 1; atype=Float32, cuda=true)
 
             # 2D:
-            test(R, p, (N, 64), 1; atype=Float64, cuda=true)
-            # test(R, p, (N, 64), 1; atype=Float32, cuda=true)
+            test(R, p, (N, 64), 1; atype=Float32, cuda=true)
             # test(R, p, (64, N), 2; atype=Float32, cuda=true)
 
             # 3D:
@@ -167,14 +173,14 @@ end
 
         # Different types:
         # 1D:
-        # test(R, 0, (N, ), 1; atype=Float64, cuda=true)
-        # test(R, 0, (N, ), 1; atype=Complex{Float64}, cuda=true)
-        # test(R, 0, (N, ), 1; atype=Complex{Float32}, cuda=true)
+        test(R, 0, (N, ), 1; atype=Float64, cuda=true)
+        test(R, 0, (N, ), 1; atype=Complex{Float64}, cuda=true)
+        test(R, 0, (N, ), 1; atype=Complex{Float32}, cuda=true)
 
         # 2D:
-        # test(R, 0, (N, 64), 1; atype=Float64, cuda=true)
-        # test(R, 0, (N, 64), 1; atype=Complex{Float64}, cuda=true)
-        # test(R, 0, (N, 64), 1; atype=Complex{Float32}, cuda=true)
+        test(R, 0, (N, 64), 1; atype=Float64, cuda=true)
+        test(R, 0, (N, 64), 1; atype=Complex{Float64}, cuda=true)
+        test(R, 0, (N, 64), 1; atype=Complex{Float32}, cuda=true)
 
         # 3D:
         # test(R, 0, (N, 32, 64), 1; atype=Float64, cuda=true)
@@ -214,7 +220,7 @@ end
         # hts = plan_dht(R, E; save=true)
         # htl = plan_dht("plan_dht.jld2")
         # rm("plan_dht.jld2")
-        hts = plan(convert(Float32, R), E; save=true)
+        hts = plan(R, E; save=true)
         htl = plan("dht.jld2")
         rm("dht.jld2")
 
@@ -227,7 +233,7 @@ end
         E1 = CUDA.ones(N)
         E2 = CUDA.ones(N)
         # ht = plan_dht(R, E1)
-        ht = plan(10f0, E1)
+        ht = plan(R, E1)
 
         dht!(E1, ht)
         ht * E2

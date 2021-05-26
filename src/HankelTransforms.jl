@@ -230,10 +230,11 @@ function kernel2(f::Vector, ftmp, TT, region)
     Naxis = size(region)[1]   # Naxis = size(region)[axis]
     for k=1:N
         i = region[k][1]   # i = region[k][axis]
-        @inbounds ftmp[k] = 0
+        res = zero(eltype(ftmp))
         for m=1:Naxis
-            @inbounds ftmp[k] = ftmp[k] + TT[i, m] * f[m]
+            @inbounds res = res + TT[i, m] * f[m]
         end
+        ftmp[k] = res
     end
     return nothing
 end
@@ -246,10 +247,11 @@ function kernel2(f::Matrix, ftmp, TT, region)
     for k=1:N
         i = region[k][1]   # i = region[k][axis]
         j = region[k][2]
-        @inbounds ftmp[k] = 0
+        res = zero(eltype(ftmp))
         for m=1:Naxis
-            @inbounds ftmp[k] = ftmp[k] + TT[i, m] * f[m, j]
+            @inbounds res = res + TT[i, m] * f[m, j]
         end
+        ftmp[k] = res
     end
     return nothing
 end
@@ -314,10 +316,11 @@ function kernel2(f::CuDeviceVector, ftmp, TT, region)
     Naxis = size(region)[1]   # Naxis = size(region)[axis]
     for k=id:stride:N
         i = region[k][1]   # i = region[k][axis]
-        @inbounds ftmp[k] = 0
+        res = zero(eltype(ftmp))
         for m=1:Naxis
-            @inbounds ftmp[k] = ftmp[k] + TT[i, m] * f[m]
+            @inbounds res = res + TT[i, m] * f[m]
         end
+        ftmp[k] = res
     end
     return nothing
 end
@@ -332,10 +335,11 @@ function kernel2(f::CuDeviceMatrix, ftmp, TT, region)
     for k=id:stride:N
         i = region[k][1]   # i = region[k][axis]
         j = region[k][2]
-        @inbounds ftmp[k] = 0
+        res = zero(eltype(ftmp))
         for m=1:Naxis
-            @inbounds ftmp[k] = ftmp[k] + TT[i, m] * f[m, j]
+            @inbounds res = res + TT[i, m] * f[m, j]
         end
+        ftmp[k] = res
     end
     return nothing
 end

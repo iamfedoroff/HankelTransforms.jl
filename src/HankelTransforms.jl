@@ -1,8 +1,9 @@
 module HankelTransforms
 
 import Base: *, \
-import CUDA: CuArray, CuDeviceArray, @cuda, launch_configuration,
-             threadIdx, blockIdx, blockDim, gridDim
+import CUDA: CuArray, CuVector, CuMatrix, CuDeviceArray, CuDeviceVector,
+             CuDeviceMatrix, @cuda, launch_configuration, threadIdx, blockIdx,
+             blockDim, gridDim
 import JLD2: @save, @load
 import Roots: fzero
 import SpecialFunctions: besselj
@@ -42,77 +43,56 @@ macro krun(ex...)
 end
 
 
-const htAbstractArray{T} = Union{AbstractArray{T}, AbstractArray{Complex{T}}}
-
-
 abstract type Plan end
 
 
-struct DHTPlan{
-    CI<:CartesianIndices,
-    T<:AbstractFloat,
-    UJ<:AbstractArray{T},
-    UT<:AbstractArray{T},
-    UF<:htAbstractArray{T},
-} <: Plan
+struct DHTPlan{A<:AbstractArray, T<:AbstractFloat, C<:CartesianIndices} <: Plan
     N :: Int
-    region :: CI
+    region :: C
     R :: T
     V :: T
-    J :: UJ
-    TT :: UT
-    ftmp :: UF
+    J :: Vector{T}
+    TT :: Matrix{T}
+    ftmp :: A
 end
 
 
-struct CuDHTPlan{
-    CI<:CartesianIndices,
-    T<:AbstractFloat,
-    UJ<:AbstractArray{T},
-    UT<:AbstractArray{T},
-    UF<:htAbstractArray{T},
-} <: Plan
+struct CuDHTPlan{A<:CuArray, T<:AbstractFloat, C<:CartesianIndices} <: Plan
     N :: Int
-    region :: CI
+    region :: C
     R :: T
     V :: T
-    J :: UJ
-    TT :: UT
-    ftmp :: UF
+    J :: CuVector{T}
+    TT :: CuMatrix{T}
+    ftmp :: A
 end
 
 
-function plan(
-    R::T, F::UF, p::Int=0; kwargs...,
-) where {T<:AbstractFloat, UF<:htAbstractArray{T}}
+function plan(R::Real, F::AbstractArray, p::Int=0; kwargs...)
     region = CartesianIndices(F)
     return plan(R, F, region, p; kwargs...)
 end
 
 
 function plan(
-    R::T,
-    F::UF,
+    R::Real,
+    F::AbstractArray,
     region::CartesianIndices,
     p::Int=0;
     save::Bool=false,
     fname::String="dht.jld2",
-) where {T<:AbstractFloat, UF<:htAbstractArray{T}}
+)
     dims = size(region)
     N = dims[1]
 
-    a = zeros(T, N)
-    J = zeros(T, N)
-    TT = zeros(T, (N, N))
+    a = @. besselj_zero(p, 1:N)
+    aNp1 = besselj_zero(p, N + 1)
 
-    @. a = besselj_zero(p, 1:N)
-    aNp1::T = besselj_zero(p, N + 1)
+    V = aNp1 / (2 * pi * R)
+    J = @. abs(besselj(p + 1, a)) / R
 
-    V::T = aNp1 / (2 * pi * R)
-    @. J = abs(besselj(p + 1, a)) / R
-
-    S::T = 2 * pi * R * V
-
+    S = 2 * pi * R * V
+    TT = zeros((N, N))
     for j=1:N
     for i=1:N
         TT[i, j] = 2 * besselj(p, a[i] * a[j] / S) /
@@ -121,24 +101,18 @@ function plan(
     end
     end
 
-    ftmp = zeros(T, dims)
+    ftmp = zeros(eltype(F), dims)
 
-    CI = typeof(region)
+    TF = real(eltype(F))
+    TC = typeof(region)
 
     if typeof(F) <: CuArray
-        J = CuArray(J)
-        TT = CuArray(TT)
         ftmp = CuArray(ftmp)
-
-        UJ = typeof(J)
-        UT = typeof(TT)
-
-        plan = CuDHTPlan{CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
+        TA = typeof(ftmp)
+        plan = CuDHTPlan{TA, TF, TC}(N, region, R, V, J, TT, ftmp)
     else
-        UJ = typeof(J)
-        UT = typeof(TT)
-
-        plan = DHTPlan{CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
+        TA = typeof(ftmp)
+        plan = DHTPlan{TA, TF, TC}(N, region, R, V, J, TT, ftmp)
     end
 
     if save
@@ -159,24 +133,20 @@ end
 """
 Compute the spatial coordinates for Hankel transform.
 """
-function htcoord(R::T, N::I, p::I=0) where {T<:AbstractFloat, I<:Int}
-    a = zeros(T, N)
-    @. a = besselj_zero(p, 1:N)
-    aNp1::T = besselj_zero(p, N + 1)
-    V::T = aNp1 / (2 * pi * R)
-    @. a = a / (2 * pi * V)   # resuse the same array to avoid allocations
-    return a
+function htcoord(R::Real, N::Int, p::Int=0)
+    a = @. besselj_zero(p, 1:N)
+    aNp1 = besselj_zero(p, N + 1)
+    V = aNp1 / (2 * pi * R)
+    return @. a / (2 * pi * V)
 end
 
 
 """
 Compute the spatial frequencies (ordinary, not angular) for Hankel transform.
 """
-function htfreq(R::T, N::I, p::I=0) where {T<:AbstractFloat, I<:Int}
-    a = zeros(T, N)
-    @. a = besselj_zero(p, 1:N)
-    @. a = a / (2 * pi * R)   # resuse the same array to avoid allocations
-    return a
+function htfreq(R::Real, N::Int, p::Int=0)
+    a = @. besselj_zero(p, 1:N)
+    return @. a / (2 * pi * R)
 end
 
 
@@ -224,9 +194,7 @@ end
 """
 Compute (in place) forward discrete Hankel transform on CPU.
 """
-function dht!(
-    f::UF, plan::DHTPlan{CI, T, UJ, UT, UF},
-) where {CI, T, UJ, UT, UF}
+function dht!(f::T, plan::DHTPlan{T}) where T
     kernel1(f, plan.J, plan.R, plan.region)
     kernel2(f, plan.ftmp, plan.TT, plan.region)
     kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
@@ -237,9 +205,7 @@ end
 """
 Compute (in place) backward discrete Hankel transform on CPU.
 """
-function idht!(
-    f::UF, plan::DHTPlan{CI, T, UJ, UT, UF},
-) where {CI, T, UJ, UT, UF}
+function idht!(f::T, plan::DHTPlan{T}) where T
     kernel1(f, plan.J, plan.V, plan.region)
     kernel2(f, plan.ftmp, plan.TT, plan.region)
     kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
@@ -258,7 +224,7 @@ function kernel1(f, J, RV, region)
 end
 
 
-function kernel2(f::AbstractArray{T, 1}, ftmp, TT, region) where T
+function kernel2(f::Vector, ftmp, TT, region)
     # axis = 1
     N = length(region)
     Naxis = size(region)[1]   # Naxis = size(region)[axis]
@@ -273,7 +239,7 @@ function kernel2(f::AbstractArray{T, 1}, ftmp, TT, region) where T
 end
 
 
-function kernel2(f::AbstractArray{T, 2}, ftmp, TT, region) where T
+function kernel2(f::Matrix, ftmp, TT, region)
     # axis = 1
     N = length(region)
     Naxis = size(region)[1]   # Naxis = size(region)[axis]
@@ -306,9 +272,7 @@ end
 """
 Compute (in place) forward discrete Hankel transform on GPU.
 """
-function dht!(
-    f::UF, plan::CuDHTPlan{CI, T, UJ, UT, UF},
-) where {CI, T, UJ, UT, UF}
+function dht!(f::T, plan::CuDHTPlan{T}) where T
     N = length(plan.region)
     @krun N kernel1(f, plan.J, plan.R, plan.region)
     @krun N kernel2(f, plan.ftmp, plan.TT, plan.region)
@@ -320,9 +284,7 @@ end
 """
 Compute (in place) backward discrete Hankel transform on GPU.
 """
-function idht!(
-    f::UF, plan::CuDHTPlan{CI, T, UJ, UT, UF},
-) where {CI, T, UJ, UT, UF}
+function idht!(f::T, plan::CuDHTPlan{T}) where T
     N = length(plan.region)
     @krun N kernel1(f, plan.J, plan.V, plan.region)
     @krun N kernel2(f, plan.ftmp, plan.TT, plan.region)
@@ -344,7 +306,7 @@ function kernel1(f::CuDeviceArray, J, RV, region)
 end
 
 
-function kernel2(f::CuDeviceArray{T, 1}, ftmp, TT, region) where T
+function kernel2(f::CuDeviceVector, ftmp, TT, region)
     id = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = blockDim().x * gridDim().x
     # axis = 1
@@ -361,7 +323,7 @@ function kernel2(f::CuDeviceArray{T, 1}, ftmp, TT, region) where T
 end
 
 
-function kernel2(f::CuDeviceArray{T, 2}, ftmp, TT, region) where T
+function kernel2(f::CuDeviceMatrix, ftmp, TT, region)
     id = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = blockDim().x * gridDim().x
     # axis = 1

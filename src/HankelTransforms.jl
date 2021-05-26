@@ -23,16 +23,6 @@ besselj_zero(nu, n; order=2) =
     fzero((x) -> besselj(nu, x), besselj_zero_asymptotic(nu, n); order=order)
 
 
-function isongpu(T)
-    if T <: CuArray
-        IOG = true
-    else
-        IOG = false
-    end
-    return IOG
-end
-
-
 macro krun(ex...)
     N = ex[1]
     call = ex[2]
@@ -55,14 +45,33 @@ end
 const htAbstractArray{T} = Union{AbstractArray{T}, AbstractArray{Complex{T}}}
 
 
-struct Plan{
-    IOG,
+abstract type Plan end
+
+
+struct DHTPlan{
     CI<:CartesianIndices,
     T<:AbstractFloat,
     UJ<:AbstractArray{T},
     UT<:AbstractArray{T},
     UF<:htAbstractArray{T},
-}
+} <: Plan
+    N :: Int
+    region :: CI
+    R :: T
+    V :: T
+    J :: UJ
+    TT :: UT
+    ftmp :: UF
+end
+
+
+struct CuDHTPlan{
+    CI<:CartesianIndices,
+    T<:AbstractFloat,
+    UJ<:AbstractArray{T},
+    UT<:AbstractArray{T},
+    UF<:htAbstractArray{T},
+} <: Plan
     N :: Int
     region :: CI
     R :: T
@@ -114,17 +123,23 @@ function plan(
 
     ftmp = zeros(T, dims)
 
-    IOG = isongpu(UF)
-    if IOG
+    CI = typeof(region)
+
+    if typeof(F) <: CuArray
         J = CuArray(J)
         TT = CuArray(TT)
         ftmp = CuArray(ftmp)
-    end
 
-    CI = typeof(region)
-    UJ = typeof(J)
-    UT = typeof(TT)
-    plan = Plan{IOG, CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
+        UJ = typeof(J)
+        UT = typeof(TT)
+
+        plan = CuDHTPlan{CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
+    else
+        UJ = typeof(J)
+        UT = typeof(TT)
+
+        plan = DHTPlan{CI, T, UJ, UT, UF}(N, region, R, V, J, TT, ftmp)
+    end
 
     if save
         @save fname plan
@@ -186,9 +201,7 @@ end
 """
 Compute (out of place) forward discrete Hankel transform.
 """
-function dht(
-    f::UF, plan::Plan{IOG, CI, T, UJ, UT, UF},
-) where {IOG, CI, T, UJ, UT, UF}
+function dht(f::AbstractArray, plan::Plan)
     ftmp = copy(f)
     dht!(ftmp, plan)
     return ftmp
@@ -198,9 +211,7 @@ end
 """
 Compute (out of place) backward discrete Hankel transform.
 """
-function idht(
-    f::UF, plan::Plan{IOG, CI, T, UJ, UT, UF},
-) where {IOG, CI, T, UJ, UT, UF}
+function idht(f::AbstractArray, plan::Plan)
     ftmp = copy(f)
     idht!(ftmp, plan)
     return ftmp
@@ -214,7 +225,7 @@ end
 Compute (in place) forward discrete Hankel transform on CPU.
 """
 function dht!(
-    f::UF, plan::Plan{false, CI, T, UJ, UT, UF},
+    f::UF, plan::DHTPlan{CI, T, UJ, UT, UF},
 ) where {CI, T, UJ, UT, UF}
     kernel1(f, plan.J, plan.R, plan.region)
     kernel2(f, plan.ftmp, plan.TT, plan.region)
@@ -227,7 +238,7 @@ end
 Compute (in place) backward discrete Hankel transform on CPU.
 """
 function idht!(
-    f::UF, plan::Plan{false, CI, T, UJ, UT, UF},
+    f::UF, plan::DHTPlan{CI, T, UJ, UT, UF},
 ) where {CI, T, UJ, UT, UF}
     kernel1(f, plan.J, plan.V, plan.region)
     kernel2(f, plan.ftmp, plan.TT, plan.region)
@@ -296,7 +307,7 @@ end
 Compute (in place) forward discrete Hankel transform on GPU.
 """
 function dht!(
-    f::UF, plan::Plan{true, CI, T, UJ, UT, UF},
+    f::UF, plan::CuDHTPlan{CI, T, UJ, UT, UF},
 ) where {CI, T, UJ, UT, UF}
     N = length(plan.region)
     @krun N kernel1(f, plan.J, plan.R, plan.region)
@@ -310,7 +321,7 @@ end
 Compute (in place) backward discrete Hankel transform on GPU.
 """
 function idht!(
-    f::UF, plan::Plan{true, CI, T, UJ, UT, UF},
+    f::UF, plan::CuDHTPlan{CI, T, UJ, UT, UF},
 ) where {CI, T, UJ, UT, UF}
     N = length(plan.region)
     @krun N kernel1(f, plan.J, plan.V, plan.region)

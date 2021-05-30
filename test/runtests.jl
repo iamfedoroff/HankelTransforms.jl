@@ -44,7 +44,11 @@ function test(R, p, s, dim; atype=Float64, cuda=false, region=nothing)
     end
 
     # ht = plan(R, A1; dim=dim, region=region, p=p)
-    ht = plan(R, A1, p)
+    if isnothing(region)
+        ht = plan(R, A1, p; dim=dim)
+    else
+        ht = plan(R, A1, CartesianIndices(region), p;  dim=dim)
+    end
 
     A2 = copy(A1)
     dht!(A2, ht)
@@ -92,12 +96,12 @@ N = 256
 
         # 2D:
         test(R, p, (N, 64), 1)
-        # test(R, p, (64, N), 2)
+        test(R, p, (64, N), 2)
 
         # 3D:
-        # test(R, p, (N, 32, 64), 1)
-        # test(R, p, (32, N, 64), 2)
-        # test(R, p, (32, 64, N), 3)
+        test(R, p, (N, 32, 64), 1)
+        test(R, p, (32, N, 64), 2)
+        test(R, p, (32, 64, N), 3)
     end
 
     # Different types:
@@ -112,16 +116,14 @@ N = 256
     test(R, 0, (N, 64), 1; atype=Complex{Float64})
 
     # 3D:
-    # test(R, 0, (N, 32, 64), 1; atype=Float32)
-    # test(R, 0, (N, 32, 64), 1; atype=Complex{Float32})
-    # test(R, 0, (N, 32, 64), 1; atype=Complex{Float64})
+    test(R, 0, (N, 32, 64), 1; atype=Float32)
+    test(R, 0, (N, 32, 64), 1; atype=Complex{Float32})
+    test(R, 0, (N, 32, 64), 1; atype=Complex{Float64})
 
     # Regions:
-    # test(R, 0, (N, ), 1; region=(N, ))
-    # test(R, 0, (N, 64), 1; region=(N, 32:2:64))
-    # test(R, 0, (N, 32, 64), 1; region=(N, 16, 32:2:64))
-    test(R, 0, (N, ), 1; region=CartesianIndices((N, )))
-    test(R, 0, (N, 64), 1; region=CartesianIndices((N, 32:2:64)))
+    test(R, 0, (N, ), 1; region=(N, ))
+    test(R, 0, (N, 64), 1; region=(N, 32:2:64))
+    test(R, 0, (N, 32, 64), 1; region=(N, 16, 32:2:64))
 
     # Save/load:
     E = ones(N)
@@ -163,12 +165,12 @@ end
 
             # 2D:
             test(R, p, (N, 64), 1; atype=Float32, cuda=true)
-            # test(R, p, (64, N), 2; atype=Float32, cuda=true)
+            test(R, p, (64, N), 2; atype=Float32, cuda=true)
 
             # 3D:
-            # test(R, p, (N, 32, 64), 1; atype=Float32, cuda=true)
-            # test(R, p, (32, N, 64), 2; atype=Float32, cuda=true)
-            # test(R, p, (32, 64, N), 3; atype=Float32, cuda=true)
+            test(R, p, (N, 32, 64), 1; atype=Float32, cuda=true)
+            test(R, p, (32, N, 64), 2; atype=Float32, cuda=true)
+            test(R, p, (32, 64, N), 3; atype=Float32, cuda=true)
         end
 
         # Different types:
@@ -183,37 +185,14 @@ end
         test(R, 0, (N, 64), 1; atype=Complex{Float32}, cuda=true)
 
         # 3D:
-        # test(R, 0, (N, 32, 64), 1; atype=Float64, cuda=true)
-        # test(R, 0, (N, 32, 64), 1; atype=Complex{Float64}, cuda=true)
-        # test(R, 0, (N, 32, 64), 1; atype=Complex{Float32}, cuda=true)
+        test(R, 0, (N, 32, 64), 1; atype=Float64, cuda=true)
+        test(R, 0, (N, 32, 64), 1; atype=Complex{Float64}, cuda=true)
+        test(R, 0, (N, 32, 64), 1; atype=Complex{Float32}, cuda=true)
 
         # Regions:
-        # test(R, 0, (N, ), 1; region=(N, ), cuda=true)
-        # test(R, 0, (N, 64), 1; region=(N, 32:2:64), cuda=true)
-        # test(R, 0, (N, 32, 64), 1; region=(N, 16, 32:2:64), cuda=true)
-        test(R, 0, (N, ), 1; region=CartesianIndices((N, )), cuda=true)
-        test(R, 0, (N, 64), 1; region=CartesianIndices((N, 32:2:64)), cuda=true)
-
-        # Multiple repetitions to ensure no synchronization problems:
-        # N1, N2 = 256, 500
-        # E = zeros(Float32, (N1, N2))
-        # for j=1:N2
-        # for i=1:N1
-        #     E[i, j] = exp(-i / N1) * exp(-j / N2)
-        # end
-        # end
-        # E0 = copy(E)
-
-        # E = CUDA.CuArray(E)
-        # # ht = plan_dht(10, E)
-        # ht = plan(10f0, E)
-
-        # for i=1:100
-        #     dht!(E, ht)
-        #     idht!(E, ht)
-        # end
-
-        # @test isapprox(collect(E), E0)
+        test(R, 0, (N, ), 1; region=(N, ), cuda=true)
+        test(R, 0, (N, 64), 1; region=(N, 32:2:64), cuda=true)
+        test(R, 0, (N, 32, 64), 1; region=(N, 16, 32:2:64), cuda=true)
 
         # Save/load:
         E = CUDA.ones(N)
@@ -243,4 +222,4 @@ end
         ht \ E2
         @test E2 == E1
     end
-    end
+end

@@ -46,25 +46,29 @@ end
 abstract type Plan end
 
 
-struct DHTPlan{A<:AbstractArray, T<:AbstractFloat, C<:CartesianIndices} <: Plan
+struct DHTPlan{A, T, TIpre, TIpos, TItot} <: Plan
     N :: Int
-    region :: C
     R :: T
     V :: T
     J :: Vector{T}
     TT :: Matrix{T}
     ftmp :: A
+    Ipre :: TIpre
+    Ipos :: TIpos
+    Itot :: TItot
 end
 
 
-struct CuDHTPlan{A<:CuArray, T<:AbstractFloat, C<:CartesianIndices} <: Plan
+struct CuDHTPlan{A, T, TIpre, TIpos, TItot} <: Plan
     N :: Int
-    region :: C
     R :: T
     V :: T
     J :: CuVector{T}
     TT :: CuMatrix{T}
     ftmp :: A
+    Ipre :: TIpre
+    Ipos :: TIpos
+    Itot :: TItot
 end
 
 
@@ -79,11 +83,16 @@ function plan(
     F::AbstractArray,
     region::CartesianIndices,
     p::Int=0;
+    dim::Int=1,
     save::Bool=false,
     fname::String="dht.jld2",
 )
-    dims = size(region)
-    N = dims[1]
+    # N = region[dim]
+    N = size(region)[dim]
+
+    Ipre = CartesianIndices(region.indices[1:dim-1])
+    Ipos = CartesianIndices(region.indices[dim+1:end])
+    Itot = CartesianIndices((length(Ipre), N, length(Ipos)))
 
     a = @. besselj_zero(p, 1:N)
     aNp1 = besselj_zero(p, N + 1)
@@ -101,18 +110,26 @@ function plan(
     end
     end
 
-    ftmp = zeros(eltype(F), dims)
+    ftmp = zeros(eltype(F), size(region))
 
     TF = real(eltype(F))
-    TC = typeof(region)
+    TIpre = typeof(Ipre)
+    TIpos = typeof(Ipos)
+    TItot = typeof(Itot)
 
     if typeof(F) <: CuArray
         ftmp = CuArray(ftmp)
         TA = typeof(ftmp)
-        plan = CuDHTPlan{TA, TF, TC}(N, region, R, V, J, TT, ftmp)
+
+        plan = CuDHTPlan{TA, TF, TIpre, TIpos, TItot}(
+            N, R, V, J, TT, ftmp, Ipre, Ipos, Itot,
+        )
     else
         TA = typeof(ftmp)
-        plan = DHTPlan{TA, TF, TC}(N, region, R, V, J, TT, ftmp)
+
+        plan = DHTPlan{TA, TF, TIpre, TIpos, TItot}(
+            N, R, V, J, TT, ftmp, Ipre, Ipos, Itot,
+        )
     end
 
     if save
@@ -195,9 +212,9 @@ end
 Compute (in place) forward discrete Hankel transform on CPU.
 """
 function dht!(f::T, plan::DHTPlan{T}) where T
-    kernel1(f, plan.J, plan.R, plan.region)
-    kernel2(f, plan.ftmp, plan.TT, plan.region)
-    kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
+    kernel1(f, plan.J, plan.R, plan.Ipre, plan.Ipos, plan.Itot)
+    kernel2(plan.ftmp, plan.TT, f, plan.Ipre, plan.Ipos, plan.Itot, plan.N)
+    kernel3(f, plan.ftmp, plan.J, plan.V, plan.Ipre, plan.Ipos, plan.Itot)
     return nothing
 end
 
@@ -206,63 +223,45 @@ end
 Compute (in place) backward discrete Hankel transform on CPU.
 """
 function idht!(f::T, plan::DHTPlan{T}) where T
-    kernel1(f, plan.J, plan.V, plan.region)
-    kernel2(f, plan.ftmp, plan.TT, plan.region)
-    kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
+    kernel1(f, plan.J, plan.V, plan.Ipre, plan.Ipos, plan.Itot)
+    kernel2(plan.ftmp, plan.TT, f, plan.Ipre, plan.Ipos, plan.Itot, plan.N)
+    kernel3(f, plan.ftmp, plan.J, plan.R, plan.Ipre, plan.Ipos, plan.Itot)
     return nothing
 end
 
 
-function kernel1(f, J, RV, region)
-    # axis = 1
-    N = length(region)
-    for k=1:N
-        i = region[k][1]   # i = region[k][axis]
-        @inbounds f[k] = f[k] * RV / J[i]
+function kernel1(f, J, RV, Ipre, Ipos, Itot)
+    for k=1:length(Itot)
+        @inbounds ipre = Ipre[Itot[k][1]]
+        @inbounds idim = Itot[k][2]
+        @inbounds ipos = Ipos[Itot[k][3]]
+        @inbounds f[ipre, idim, ipos] = f[ipre, idim, ipos] * RV / J[idim]
     end
     return nothing
 end
 
 
-function kernel2(f::Vector, ftmp, TT, region)
-    # axis = 1
-    N = length(region)
-    Naxis = size(region)[1]   # Naxis = size(region)[axis]
-    for k=1:N
-        i = region[k][1]   # i = region[k][axis]
+function kernel2(ftmp, TT, f, Ipre, Ipos, Itot, N)
+    for k=1:length(Itot)
+        @inbounds ipre = Ipre[Itot[k][1]]
+        @inbounds idim = Itot[k][2]
+        @inbounds ipos = Ipos[Itot[k][3]]
         res = zero(eltype(ftmp))
-        for m=1:Naxis
-            @inbounds res = res + TT[i, m] * f[m]
+        for m=1:N
+            @inbounds res = res + TT[idim, m] * f[ipre, m, ipos]
         end
-        ftmp[k] = res
+        @inbounds ftmp[k] = res
     end
     return nothing
 end
 
 
-function kernel2(f::Matrix, ftmp, TT, region)
-    # axis = 1
-    N = length(region)
-    Naxis = size(region)[1]   # Naxis = size(region)[axis]
-    for k=1:N
-        i = region[k][1]   # i = region[k][axis]
-        j = region[k][2]
-        res = zero(eltype(ftmp))
-        for m=1:Naxis
-            @inbounds res = res + TT[i, m] * f[m, j]
-        end
-        ftmp[k] = res
-    end
-    return nothing
-end
-
-
-function kernel3(f, ftmp, J, RV, region)
-    # axis = 1
-    N = length(region)
-    for k=1:N
-        i = region[k][1]   # i = region[k][axis]
-        @inbounds f[k] = ftmp[k] * J[i] / RV
+function kernel3(f, ftmp, J, RV, Ipre, Ipos, Itot)
+    for k=1:length(Itot)
+        @inbounds ipre = Ipre[Itot[k][1]]
+        @inbounds idim = Itot[k][2]
+        @inbounds ipos = Ipos[Itot[k][3]]
+        @inbounds f[ipre, idim, ipos] = ftmp[k] * J[idim] / RV
     end
     return nothing
 end
@@ -275,10 +274,10 @@ end
 Compute (in place) forward discrete Hankel transform on GPU.
 """
 function dht!(f::T, plan::CuDHTPlan{T}) where T
-    N = length(plan.region)
-    @krun N kernel1(f, plan.J, plan.R, plan.region)
-    @krun N kernel2(f, plan.ftmp, plan.TT, plan.region)
-    @krun N kernel3(f, plan.ftmp, plan.J, plan.V, plan.region)
+    N = length(plan.Itot)
+    @krun N kernel1(f, plan.J, plan.R, plan.Ipre, plan.Ipos, plan.Itot)
+    @krun N kernel2(plan.ftmp, plan.TT, f, plan.Ipre, plan.Ipos, plan.Itot, plan.N)
+    @krun N kernel3(f, plan.ftmp, plan.J, plan.V, plan.Ipre, plan.Ipos, plan.Itot)
     return nothing
 end
 
@@ -287,72 +286,52 @@ end
 Compute (in place) backward discrete Hankel transform on GPU.
 """
 function idht!(f::T, plan::CuDHTPlan{T}) where T
-    N = length(plan.region)
-    @krun N kernel1(f, plan.J, plan.V, plan.region)
-    @krun N kernel2(f, plan.ftmp, plan.TT, plan.region)
-    @krun N kernel3(f, plan.ftmp, plan.J, plan.R, plan.region)
+    N = length(plan.Itot)
+    @krun N kernel1(f, plan.J, plan.V, plan.Ipre, plan.Ipos, plan.Itot)
+    @krun N kernel2(plan.ftmp, plan.TT, f, plan.Ipre, plan.Ipos, plan.Itot, plan.N)
+    @krun N kernel3(f, plan.ftmp, plan.J, plan.R, plan.Ipre, plan.Ipos, plan.Itot)
     return nothing
 end
 
 
-function kernel1(f::CuDeviceArray, J, RV, region)
+function kernel1(f::CuDeviceArray, J, RV, Ipre, Ipos, Itot)
     id = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = blockDim().x * gridDim().x
-    # axis = 1
-    N = length(region)
-    for k=id:stride:N
-        i = region[k][1]   # i = region[k][axis]
-        @inbounds f[k] = f[k] * RV / J[i]
+    for k=id:stride:length(Itot)
+        @inbounds ipre = Ipre[Itot[k][1]]
+        @inbounds idim = Itot[k][2]
+        @inbounds ipos = Ipos[Itot[k][3]]
+        @inbounds f[ipre, idim, ipos] = f[ipre, idim, ipos] * RV / J[idim]
     end
     return nothing
 end
 
 
-function kernel2(f::CuDeviceVector, ftmp, TT, region)
+function kernel2(ftmp, TT, f::CuDeviceArray, Ipre, Ipos, Itot, N)
     id = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = blockDim().x * gridDim().x
-    # axis = 1
-    N = length(region)
-    Naxis = size(region)[1]   # Naxis = size(region)[axis]
-    for k=id:stride:N
-        i = region[k][1]   # i = region[k][axis]
+    for k=id:stride:length(Itot)
+        @inbounds ipre = Ipre[Itot[k][1]]
+        @inbounds idim = Itot[k][2]
+        @inbounds ipos = Ipos[Itot[k][3]]
         res = zero(eltype(ftmp))
-        for m=1:Naxis
-            @inbounds res = res + TT[i, m] * f[m]
+        for m=1:N
+            @inbounds res = res + TT[idim, m] * f[ipre, m, ipos]
         end
-        ftmp[k] = res
+        @inbounds ftmp[k] = res
     end
     return nothing
 end
 
 
-function kernel2(f::CuDeviceMatrix, ftmp, TT, region)
+function kernel3(f::CuDeviceArray, ftmp, J, RV, Ipre, Ipos, Itot)
     id = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = blockDim().x * gridDim().x
-    # axis = 1
-    N = length(region)
-    Naxis = size(region)[1]   # Naxis = size(region)[axis]
-    for k=id:stride:N
-        i = region[k][1]   # i = region[k][axis]
-        j = region[k][2]
-        res = zero(eltype(ftmp))
-        for m=1:Naxis
-            @inbounds res = res + TT[i, m] * f[m, j]
-        end
-        ftmp[k] = res
-    end
-    return nothing
-end
-
-
-function kernel3(f::CuDeviceArray, ftmp, J, RV, region)
-    id = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-    stride = blockDim().x * gridDim().x
-    # axis = 1
-    N = length(region)
-    for k=id:stride:N
-        i = region[k][1]   # i = region[k][axis]
-        @inbounds f[k] = ftmp[k] * J[i] / RV
+    for k=id:stride:length(Itot)
+        @inbounds ipre = Ipre[Itot[k][1]]
+        @inbounds idim = Itot[k][2]
+        @inbounds ipos = Ipos[Itot[k][3]]
+        @inbounds f[ipre, idim, ipos] = ftmp[k] * J[idim] / RV
     end
     return nothing
 end

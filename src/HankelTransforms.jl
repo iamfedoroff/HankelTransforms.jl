@@ -72,27 +72,16 @@ struct CuDHTPlan{TA, T, TIpre, TIpos, TItot} <: Plan
 end
 
 
-function plan(R::Real, A::AbstractArray, p::Int=0; kwargs...)
-    region = CartesianIndices(A)
-    return plan(R, A, region, p; kwargs...)
-end
-
-
 function plan(
     R::Real,
-    A::AbstractArray,
-    region::CartesianIndices,
-    p::Int=0;
+    A::AbstractArray;
+    p::Int=0,
     dim::Int=1,
+    region::Tuple=size(A),
     save::Bool=false,
     fname::String="dht.jld2",
 )
-    # N = region[dim]
-    N = size(region)[dim]
-
-    Ipre = CartesianIndices(region.indices[1:dim-1])
-    Ipos = CartesianIndices(region.indices[dim+1:end])
-    Itot = CartesianIndices((length(Ipre), N, length(Ipos)))
+    N = region[dim]
 
     a = @. besselj_zero(p, 1:N)
     aNp1 = besselj_zero(p, N + 1)
@@ -110,7 +99,11 @@ function plan(
     end
     end
 
-    Atmp = zeros(eltype(A), size(region))
+    Atmp = zeros(eltype(A), size(CartesianIndices(region)))
+
+    Ipre = CartesianIndices(region[1:dim-1])
+    Ipos = CartesianIndices(region[dim+1:end])
+    Itot = CartesianIndices((length(Ipre), N, length(Ipos)))
 
     TF = real(eltype(A))
     TIpre = typeof(Ipre)
@@ -150,7 +143,7 @@ end
 """
 Compute the spatial coordinates for Hankel transform.
 """
-function htcoord(R::Real, N::Int, p::Int=0)
+function htcoord(R::Real, N::Int; p::Int=0)
     a = @. besselj_zero(p, 1:N)
     aNp1 = besselj_zero(p, N + 1)
     V = aNp1 / (2 * pi * R)
@@ -161,7 +154,7 @@ end
 """
 Compute the spatial frequencies (ordinary, not angular) for Hankel transform.
 """
-function htfreq(R::Real, N::Int, p::Int=0)
+function htfreq(R::Real, N::Int; p::Int=0)
     a = @. besselj_zero(p, 1:N)
     return @. a / (2 * pi * R)
 end

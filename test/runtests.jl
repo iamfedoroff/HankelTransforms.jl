@@ -22,13 +22,11 @@ function mysinc_spectrum(v, p)
 end
 
 
-function test(R, p, s, dim; atype=Float64, cuda=false, region=nothing)
+function test(R, p, s, dim; atype=Float64, cuda=false, region=s)
     N = s[dim]
 
-    # r = htcoord(R, N; p=p)
-    # v = htfreq(R, N; p=p)
-    r = htcoord(R, N, p)
-    v = htfreq(R, N, p)
+    r = htcoord(R, N; p=p)
+    v = htfreq(R, N; p=p)
 
     A1 = zeros(atype, s)
     A2th = zeros(atype, s)
@@ -43,12 +41,7 @@ function test(R, p, s, dim; atype=Float64, cuda=false, region=nothing)
         A2th = CuArray(A2th)
     end
 
-    # ht = plan(R, A1; dim=dim, region=region, p=p)
-    if isnothing(region)
-        ht = plan(R, A1, p; dim=dim)
-    else
-        ht = plan(R, A1, CartesianIndices(region), p;  dim=dim)
-    end
+    ht = plan(R, A1; p=p, dim=dim, region=region)
 
     A2 = copy(A1)
     dht!(A2, ht)
@@ -56,7 +49,7 @@ function test(R, p, s, dim; atype=Float64, cuda=false, region=nothing)
     A3 = copy(A2)
     idht!(A3, ht)
 
-    if isnothing(region)
+    if region == s
         err = 20 * log10.(abs.(A2th .- A2) / maximum(abs.(A2)))
         @test maximum(err) < -10
     end

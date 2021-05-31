@@ -8,7 +8,7 @@ import JLD2: @save, @load
 import Roots: fzero
 import SpecialFunctions: besselj
 
-export plan, htcoord, htfreq, dht!, dht, idht!, idht
+export plan_dht, dhtcoord, dhtfreq, dht!, dht, idht!, idht
 
 
 # Adopted from FunctionZeros.jl
@@ -72,14 +72,14 @@ struct CuDHTPlan{TA, T, TIpre, TIpos, TItot} <: Plan
 end
 
 
-function plan(
+function plan_dht(
     R::Real,
     A::AbstractArray;
     p::Int=0,
     dim::Int=1,
     region::Tuple=size(A),
     save::Bool=false,
-    fname::String="dht.jld2",
+    fname::String="plan_dht.jld2",
 )
     N = region[dim]
 
@@ -133,7 +133,7 @@ function plan(
 end
 
 
-function plan(fname::String)
+function plan_dht(fname::String)
     plan = nothing
     @load fname plan
     return plan
@@ -143,7 +143,7 @@ end
 """
 Compute the spatial coordinates for Hankel transform.
 """
-function htcoord(R::Real, N::Int; p::Int=0)
+function dhtcoord(R::Real, N::Int; p::Int=0)
     a = @. besselj_zero(p, 1:N)
     aNp1 = besselj_zero(p, N + 1)
     V = aNp1 / (2 * pi * R)
@@ -154,7 +154,7 @@ end
 """
 Compute the spatial frequencies (ordinary, not angular) for Hankel transform.
 """
-function htfreq(R::Real, N::Int; p::Int=0)
+function dhtfreq(R::Real, N::Int; p::Int=0)
     a = @. besselj_zero(p, 1:N)
     return @. a / (2 * pi * R)
 end

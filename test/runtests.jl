@@ -25,8 +25,8 @@ end
 function test(R, p, s, dim; atype=Float64, cuda=false, region=s)
     N = s[dim]
 
-    r = htcoord(R, N; p=p)
-    v = htfreq(R, N; p=p)
+    r = dhtcoord(R, N; p=p)
+    v = dhtfreq(R, N; p=p)
 
     A1 = zeros(atype, s)
     A2th = zeros(atype, s)
@@ -41,7 +41,7 @@ function test(R, p, s, dim; atype=Float64, cuda=false, region=s)
         A2th = CuArray(A2th)
     end
 
-    ht = plan(R, A1; p=p, dim=dim, region=region)
+    ht = plan_dht(R, A1; p=p, dim=dim, region=region)
 
     A2 = copy(A1)
     dht!(A2, ht)
@@ -120,12 +120,9 @@ N = 256
 
     # Save/load:
     E = ones(N)
-    # hts = plan_dht(R, E; save=true)
-    # htl = plan_dht("plan_dht.jld2")
-    # rm("plan_dht.jld2")
-    hts = plan(R, E; save=true)
-    htl = plan("dht.jld2")
-    rm("dht.jld2")
+    hts = plan_dht(R, E; save=true)
+    htl = plan_dht("plan_dht.jld2")
+    rm("plan_dht.jld2")
 
     @test fieldnames(typeof(hts)) == fieldnames(typeof(htl))
     for v in fieldnames(typeof(hts))
@@ -135,8 +132,7 @@ N = 256
     # AbstractFFTs API:
     E1 = ones(N)
     E2 = ones(N)
-    # ht = plan_dht(R, E1)
-    ht = plan(R, E1)
+    ht = plan_dht(R, E1)
 
     dht!(E1, ht)
     ht * E2
@@ -189,12 +185,9 @@ end
 
         # Save/load:
         E = CUDA.ones(N)
-        # hts = plan_dht(R, E; save=true)
-        # htl = plan_dht("plan_dht.jld2")
-        # rm("plan_dht.jld2")
-        hts = plan(R, E; save=true)
-        htl = plan("dht.jld2")
-        rm("dht.jld2")
+        hts = plan_dht(R, E; save=true)
+        htl = plan_dht("plan_dht.jld2")
+        rm("plan_dht.jld2")
 
         @test fieldnames(typeof(hts)) == fieldnames(typeof(htl))
         for v in fieldnames(typeof(hts))
@@ -204,8 +197,7 @@ end
         # AbstractFFTs API:
         E1 = CUDA.ones(N)
         E2 = CUDA.ones(N)
-        # ht = plan_dht(R, E1)
-        ht = plan(R, E1)
+        ht = plan_dht(R, E1)
 
         dht!(E1, ht)
         ht * E2

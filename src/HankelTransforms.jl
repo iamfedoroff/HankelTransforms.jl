@@ -46,41 +46,41 @@ end
 abstract type Plan end
 
 
-struct DHTPlan{A, T, TIpre, TIpos, TItot} <: Plan
+struct DHTPlan{TA, T, TIpre, TIpos, TItot} <: Plan
     N :: Int
     R :: T
     V :: T
     J :: Vector{T}
     TT :: Matrix{T}
-    ftmp :: A
+    Atmp :: TA
     Ipre :: TIpre
     Ipos :: TIpos
     Itot :: TItot
 end
 
 
-struct CuDHTPlan{A, T, TIpre, TIpos, TItot} <: Plan
+struct CuDHTPlan{TA, T, TIpre, TIpos, TItot} <: Plan
     N :: Int
     R :: T
     V :: T
     J :: CuVector{T}
     TT :: CuMatrix{T}
-    ftmp :: A
+    Atmp :: TA
     Ipre :: TIpre
     Ipos :: TIpos
     Itot :: TItot
 end
 
 
-function plan(R::Real, F::AbstractArray, p::Int=0; kwargs...)
-    region = CartesianIndices(F)
-    return plan(R, F, region, p; kwargs...)
+function plan(R::Real, A::AbstractArray, p::Int=0; kwargs...)
+    region = CartesianIndices(A)
+    return plan(R, A, region, p; kwargs...)
 end
 
 
 function plan(
     R::Real,
-    F::AbstractArray,
+    A::AbstractArray,
     region::CartesianIndices,
     p::Int=0;
     dim::Int=1,
@@ -110,25 +110,25 @@ function plan(
     end
     end
 
-    ftmp = zeros(eltype(F), size(region))
+    Atmp = zeros(eltype(A), size(region))
 
-    TF = real(eltype(F))
+    TF = real(eltype(A))
     TIpre = typeof(Ipre)
     TIpos = typeof(Ipos)
     TItot = typeof(Itot)
 
-    if typeof(F) <: CuArray
-        ftmp = CuArray(ftmp)
-        TA = typeof(ftmp)
+    if typeof(A) <: CuArray
+        Atmp = CuArray(Atmp)
+        TA = typeof(Atmp)
 
         plan = CuDHTPlan{TA, TF, TIpre, TIpos, TItot}(
-            N, R, V, J, TT, ftmp, Ipre, Ipos, Itot,
+            N, R, V, J, TT, Atmp, Ipre, Ipos, Itot,
         )
     else
-        TA = typeof(ftmp)
+        TA = typeof(Atmp)
 
         plan = DHTPlan{TA, TF, TIpre, TIpos, TItot}(
-            N, R, V, J, TT, ftmp, Ipre, Ipos, Itot,
+            N, R, V, J, TT, Atmp, Ipre, Ipos, Itot,
         )
     end
 
@@ -170,14 +170,14 @@ end
 # ******************************************************************************
 # AbstractFFTs API
 # ******************************************************************************
-function *(plan::Plan, f::AbstractArray)
-    dht!(f, plan)
+function *(p::Plan, A::AbstractArray)
+    dht!(A, p)
     return nothing
 end
 
 
-function \(plan::Plan, f::AbstractArray)
-    idht!(f, plan)
+function \(p::Plan, A::AbstractArray)
+    idht!(A, p)
     return nothing
 end
 
@@ -188,20 +188,20 @@ end
 """
 Compute (out of place) forward discrete Hankel transform.
 """
-function dht(f::AbstractArray, plan::Plan)
-    ftmp = copy(f)
-    dht!(ftmp, plan)
-    return ftmp
+function dht(A::AbstractArray, p::Plan)
+    Atmp = copy(A)
+    dht!(Atmp, p)
+    return Atmp
 end
 
 
 """
 Compute (out of place) backward discrete Hankel transform.
 """
-function idht(f::AbstractArray, plan::Plan)
-    ftmp = copy(f)
-    idht!(ftmp, plan)
-    return ftmp
+function idht(A::AbstractArray, p::Plan)
+    Atmp = copy(A)
+    idht!(Atmp, p)
+    return Atmp
 end
 
 
@@ -211,10 +211,10 @@ end
 """
 Compute (in place) forward discrete Hankel transform on CPU.
 """
-function dht!(f::T, plan::DHTPlan{T}) where T
-    kernel1(f, plan.J, plan.R, plan.Ipre, plan.Ipos, plan.Itot)
-    kernel2(plan.ftmp, plan.TT, f, plan.Ipre, plan.Ipos, plan.Itot, plan.N)
-    kernel3(f, plan.ftmp, plan.J, plan.V, plan.Ipre, plan.Ipos, plan.Itot)
+function dht!(A::T, p::DHTPlan{T}) where T
+    kernel1(A, p.J, p.R, p.Ipre, p.Ipos, p.Itot)
+    kernel2(p.Atmp, p.TT, A, p.Ipre, p.Ipos, p.Itot, p.N)
+    kernel3(A, p.Atmp, p.J, p.V, p.Ipre, p.Ipos, p.Itot)
     return nothing
 end
 
@@ -222,46 +222,46 @@ end
 """
 Compute (in place) backward discrete Hankel transform on CPU.
 """
-function idht!(f::T, plan::DHTPlan{T}) where T
-    kernel1(f, plan.J, plan.V, plan.Ipre, plan.Ipos, plan.Itot)
-    kernel2(plan.ftmp, plan.TT, f, plan.Ipre, plan.Ipos, plan.Itot, plan.N)
-    kernel3(f, plan.ftmp, plan.J, plan.R, plan.Ipre, plan.Ipos, plan.Itot)
+function idht!(A::T, p::DHTPlan{T}) where T
+    kernel1(A, p.J, p.V, p.Ipre, p.Ipos, p.Itot)
+    kernel2(p.Atmp, p.TT, A, p.Ipre, p.Ipos, p.Itot, p.N)
+    kernel3(A, p.Atmp, p.J, p.R, p.Ipre, p.Ipos, p.Itot)
     return nothing
 end
 
 
-function kernel1(f, J, RV, Ipre, Ipos, Itot)
+function kernel1(A, J, RV, Ipre, Ipos, Itot)
     for k=1:length(Itot)
         @inbounds ipre = Ipre[Itot[k][1]]
         @inbounds idim = Itot[k][2]
         @inbounds ipos = Ipos[Itot[k][3]]
-        @inbounds f[ipre, idim, ipos] = f[ipre, idim, ipos] * RV / J[idim]
+        @inbounds A[ipre, idim, ipos] = A[ipre, idim, ipos] * RV / J[idim]
     end
     return nothing
 end
 
 
-function kernel2(ftmp, TT, f, Ipre, Ipos, Itot, N)
+function kernel2(Atmp, TT, A, Ipre, Ipos, Itot, N)
     for k=1:length(Itot)
         @inbounds ipre = Ipre[Itot[k][1]]
         @inbounds idim = Itot[k][2]
         @inbounds ipos = Ipos[Itot[k][3]]
-        res = zero(eltype(ftmp))
+        res = zero(eltype(Atmp))
         for m=1:N
-            @inbounds res = res + TT[idim, m] * f[ipre, m, ipos]
+            @inbounds res = res + TT[idim, m] * A[ipre, m, ipos]
         end
-        @inbounds ftmp[k] = res
+        @inbounds Atmp[k] = res
     end
     return nothing
 end
 
 
-function kernel3(f, ftmp, J, RV, Ipre, Ipos, Itot)
+function kernel3(A, Atmp, J, RV, Ipre, Ipos, Itot)
     for k=1:length(Itot)
         @inbounds ipre = Ipre[Itot[k][1]]
         @inbounds idim = Itot[k][2]
         @inbounds ipos = Ipos[Itot[k][3]]
-        @inbounds f[ipre, idim, ipos] = ftmp[k] * J[idim] / RV
+        @inbounds A[ipre, idim, ipos] = Atmp[k] * J[idim] / RV
     end
     return nothing
 end
@@ -273,11 +273,11 @@ end
 """
 Compute (in place) forward discrete Hankel transform on GPU.
 """
-function dht!(f::T, plan::CuDHTPlan{T}) where T
-    N = length(plan.Itot)
-    @krun N kernel1(f, plan.J, plan.R, plan.Ipre, plan.Ipos, plan.Itot)
-    @krun N kernel2(plan.ftmp, plan.TT, f, plan.Ipre, plan.Ipos, plan.Itot, plan.N)
-    @krun N kernel3(f, plan.ftmp, plan.J, plan.V, plan.Ipre, plan.Ipos, plan.Itot)
+function dht!(A::T, p::CuDHTPlan{T}) where T
+    N = length(p.Itot)
+    @krun N kernel1(A, p.J, p.R, p.Ipre, p.Ipos, p.Itot)
+    @krun N kernel2(p.Atmp, p.TT, A, p.Ipre, p.Ipos, p.Itot, p.N)
+    @krun N kernel3(A, p.Atmp, p.J, p.V, p.Ipre, p.Ipos, p.Itot)
     return nothing
 end
 
@@ -285,53 +285,53 @@ end
 """
 Compute (in place) backward discrete Hankel transform on GPU.
 """
-function idht!(f::T, plan::CuDHTPlan{T}) where T
-    N = length(plan.Itot)
-    @krun N kernel1(f, plan.J, plan.V, plan.Ipre, plan.Ipos, plan.Itot)
-    @krun N kernel2(plan.ftmp, plan.TT, f, plan.Ipre, plan.Ipos, plan.Itot, plan.N)
-    @krun N kernel3(f, plan.ftmp, plan.J, plan.R, plan.Ipre, plan.Ipos, plan.Itot)
+function idht!(A::T, p::CuDHTPlan{T}) where T
+    N = length(p.Itot)
+    @krun N kernel1(A, p.J, p.V, p.Ipre, p.Ipos, p.Itot)
+    @krun N kernel2(p.Atmp, p.TT, A, p.Ipre, p.Ipos, p.Itot, p.N)
+    @krun N kernel3(A, p.Atmp, p.J, p.R, p.Ipre, p.Ipos, p.Itot)
     return nothing
 end
 
 
-function kernel1(f::CuDeviceArray, J, RV, Ipre, Ipos, Itot)
+function kernel1(A::CuDeviceArray, J, RV, Ipre, Ipos, Itot)
     id = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = blockDim().x * gridDim().x
     for k=id:stride:length(Itot)
         @inbounds ipre = Ipre[Itot[k][1]]
         @inbounds idim = Itot[k][2]
         @inbounds ipos = Ipos[Itot[k][3]]
-        @inbounds f[ipre, idim, ipos] = f[ipre, idim, ipos] * RV / J[idim]
+        @inbounds A[ipre, idim, ipos] = A[ipre, idim, ipos] * RV / J[idim]
     end
     return nothing
 end
 
 
-function kernel2(ftmp, TT, f::CuDeviceArray, Ipre, Ipos, Itot, N)
+function kernel2(Atmp, TT, A::CuDeviceArray, Ipre, Ipos, Itot, N)
     id = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = blockDim().x * gridDim().x
     for k=id:stride:length(Itot)
         @inbounds ipre = Ipre[Itot[k][1]]
         @inbounds idim = Itot[k][2]
         @inbounds ipos = Ipos[Itot[k][3]]
-        res = zero(eltype(ftmp))
+        res = zero(eltype(Atmp))
         for m=1:N
-            @inbounds res = res + TT[idim, m] * f[ipre, m, ipos]
+            @inbounds res = res + TT[idim, m] * A[ipre, m, ipos]
         end
-        @inbounds ftmp[k] = res
+        @inbounds Atmp[k] = res
     end
     return nothing
 end
 
 
-function kernel3(f::CuDeviceArray, ftmp, J, RV, Ipre, Ipos, Itot)
+function kernel3(A::CuDeviceArray, Atmp, J, RV, Ipre, Ipos, Itot)
     id = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = blockDim().x * gridDim().x
     for k=id:stride:length(Itot)
         @inbounds ipre = Ipre[Itot[k][1]]
         @inbounds idim = Itot[k][2]
         @inbounds ipos = Ipos[Itot[k][3]]
-        @inbounds f[ipre, idim, ipos] = ftmp[k] * J[idim] / RV
+        @inbounds A[ipre, idim, ipos] = Atmp[k] * J[idim] / RV
     end
     return nothing
 end

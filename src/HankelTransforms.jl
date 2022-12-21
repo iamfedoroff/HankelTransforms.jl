@@ -35,7 +35,7 @@ macro krun(ex...)
         local $kernel = @cuda launch=false $call
         local $config = launch_configuration($kernel.fun)
         local $threads = min($N, $config.threads)
-        local $blocks = cld($N, $threads)
+        local $blocks = min($config.blocks, cld($N, $threads))
         $kernel($(args...); threads=$threads, blocks=$blocks)
     end
 
